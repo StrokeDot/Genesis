@@ -612,8 +612,8 @@ endif()
 
 if (MSVC)
     target_compile_options(video_core PRIVATE
-        /we4242 # 'identifier': conversion from 'type1' to 'type2', possible loss of data
-        /we4244 # 'conversion': conversion from 'type1' to 'type2', possible loss of data
+        /w44242 # 'identifier': conversion from 'type1' to 'type2', possible loss of data
+        /w44244 # 'conversion': conversion from 'type1' to 'type2', possible loss of data
     )
 else()
     if (APPLE)
