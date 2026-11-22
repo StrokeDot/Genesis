@@ -811,11 +811,22 @@ void GameListWorker::run() {
 
             std::string name = " ";
             const auto res3 = app_loader->ReadTitle(name);
-            if ((res3 != Loader::ResultStatus::Success || name.empty() || name == " ") &&
-                loose_dump) {
+            const bool title_missing =
+                res3 != Loader::ResultStatus::Success || name.empty() || name == " ";
+            if (title_missing && loose_dump) {
                 if (const QString loose = LooseExeFSName(task.physical_name); !loose.isEmpty()) {
                     name = loose.toStdString();
                 }
+            }
+
+            // Skip NRO/NSO/KIP plugin libraries (e.g. Skyline hooks) that have no title ID,
+            // no NACP title, and no icon — they are shared modules, not playable games.
+            const auto app_file_type = app_loader->GetFileType();
+            if ((app_file_type == Loader::FileType::NRO ||
+                 app_file_type == Loader::FileType::NSO ||
+                 app_file_type == Loader::FileType::KIP) &&
+                id == 0 && title_missing && icon.empty()) {
+                return;
             }
 
             WriteCachedIconAndName(id, icon, name);
@@ -829,7 +840,7 @@ void GameListWorker::run() {
                     return FormatPatchNameVersions(patch, *app_loader, updatable);
                 });
 
-            const std::string type_str = Loader::GetFileTypeString(app_loader->GetFileType());
+            const std::string type_str = Loader::GetFileTypeString(app_file_type);
             const u64 size = loose_dump ? 0 : task.file_size;
 
             index_entry.titles.push_back(GameListIndex::TitleRecord{
@@ -871,6 +882,8 @@ void GameListWorker::run() {
         } else {
             emit_and_record(loader, program_id);
         }
+
+        index_entry.is_bootable = !index_entry.titles.empty();
 
         std::scoped_lock lk(index_mutex);
         scan_index.Upsert(task.path, std::move(index_entry));

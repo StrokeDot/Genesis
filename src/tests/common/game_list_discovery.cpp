@@ -225,6 +225,23 @@ TEST_CASE("ParseQtGameDirs extracts custom paths and skips virtual NAND entries"
     const auto dirs = GameListDiscovery::ParseQtGameDirs(ini);
     REQUIRE(dirs.size() == 1);
     CHECK(dirs[0] == std::filesystem::path("D:/Switch Games/Switch Games"));
+
+    // Discover must skip hidden dot-directories (e.g. .longshot_exefs) and romfs trees.
+    ScopedTempDir tmp;
+    TouchFile(tmp.path / "Game" / "exefs" / "main");
+    TouchFile(tmp.path / "Game" / "exefs" / "main.npdm");
+    TouchFile(tmp.path / "Game" / "romfs" / "nested" / "junk.nro");
+    TouchFile(tmp.path / "Port" / ".longshot_exefs" / "main");
+    TouchFile(tmp.path / "Port" / ".longshot_exefs" / "main.npdm");
+
+    const auto disc = GameListDiscovery::Discover(
+        tmp.path, true,
+        [](const std::filesystem::path& p) {
+            return p.filename() == "main" || p.extension() == ".nro";
+        },
+        [] { return false; });
+    REQUIRE(disc.files.size() == 1);
+    CHECK(disc.files[0] == tmp.path / "Game" / "exefs" / "main");
 }
 
 TEST_CASE("AutoSetup selects highest version prod.keys and firmware directory",

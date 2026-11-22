@@ -217,7 +217,7 @@ struct FileIndexEntry {
 class PersistentScanIndex {
 public:
     static constexpr std::array<char, 4> Magic{'G', 'N', 'S', 'I'};
-    static constexpr u32 FormatVersion = 1;
+    static constexpr u32 FormatVersion = 2;
 
     bool Load(const std::filesystem::path& file_path) {
         entries.clear();

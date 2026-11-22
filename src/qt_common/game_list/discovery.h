@@ -554,11 +554,14 @@ Result Discover(const std::filesystem::path& root, bool deep, Supported supporte
                 std::transform(name.begin(), name.end(), name.begin(), [](char8_t c) {
                     return static_cast<char8_t>(std::tolower(static_cast<unsigned char>(c)));
                 });
-                if (name == u8"romfs" && IsExeFS(directory / "exefs")) {
+                if (!name.empty() && (name.front() == u8'.' || name.front() == u8'$')) {
+                    continue;
+                }
+                if (name == u8"romfs") {
                     ++result.skipped_romfs;
                     continue;
                 }
-                if (deep || depth == 0) {
+                if ((deep && depth < 6) || depth == 0) {
                     pending.emplace_back(entry.path(), depth + 1);
                 }
             } else if (entry.is_regular_file(entry_ec) && depth == 0 && !deep) {
