@@ -148,6 +148,11 @@ add_executable(update_checker_tests
 target_link_libraries(update_checker_tests PRIVATE common Catch2::Catch2WithMain)
 add_test(NAME update_checker_tests COMMAND update_checker_tests)
 
+add_executable(game_list_discovery_tests
+    common/game_list_discovery.cpp)
+target_link_libraries(game_list_discovery_tests PRIVATE common Catch2::Catch2WithMain)
+add_test(NAME game_list_discovery_tests COMMAND game_list_discovery_tests)
+
 # needed for vma
 if (NOT MSVC)
     target_compile_options(tests PRIVATE

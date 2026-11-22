@@ -107,13 +107,13 @@ jobs:
         shell: bash
         run: |
           sccache --zero-stats
-          cmake --build build/release --target yuzu yuzu-cmd tests --parallel
+          cmake --build build/release --target yuzu yuzu-cmd game_list_discovery_tests --parallel
           sccache --show-stats
 
       - name: Run discovery & index unit tests
         shell: pwsh
         run: |
-          ./build/release/bin/tests.exe "[game_list_discovery]"
+          ./build/release/bin/game_list_discovery_tests.exe
 
       - name: Stop sccache
         if: always()
