@@ -1935,7 +1935,7 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
     if (close_pending) {
         return;
     }
-    LOG_INFO(Frontend, "Lichii starting...");
+    LOG_INFO(Frontend, "Genesis starting...");
 
     if (params.program_id == 0 ||
         params.program_id > static_cast<u64>(Service::AM::AppletProgramId::MaxProgramId)) {
@@ -1956,17 +1956,19 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
     const auto loader =
         Loader::GetLoader(*QtCommon::system, v_file, params.program_id, params.program_index);
 
-    if (loader != nullptr && loader->ReadProgramId(title_id) == Loader::ResultStatus::Success &&
-        type == StartGameType::Normal) {
-        // Load per game settings
-        const auto file_path =
-            std::filesystem::path{Common::U16StringFromBuffer(filename.utf16(), filename.size())};
-        const auto config_file_name = title_id == 0
-                                          ? Common::FS::PathToUTF8String(file_path.filename())
-                                          : fmt::format("{:016X}", title_id);
-        QtConfig per_game_config(config_file_name, Config::ConfigType::PerGameConfig);
-        QtCommon::system->HIDCore().ReloadInputDevices();
-        QtCommon::system->ApplySettings();
+    if (loader != nullptr && loader->ReadProgramId(title_id) == Loader::ResultStatus::Success) {
+        QtCommon::Content::EnsureTitleContentRegistered(title_id);
+        if (type == StartGameType::Normal) {
+            // Load per game settings
+            const auto file_path =
+                std::filesystem::path{Common::U16StringFromBuffer(filename.utf16(), filename.size())};
+            const auto config_file_name = title_id == 0
+                                              ? Common::FS::PathToUTF8String(file_path.filename())
+                                              : fmt::format("{:016X}", title_id);
+            QtConfig per_game_config(config_file_name, Config::ConfigType::PerGameConfig);
+            QtCommon::system->HIDCore().ReloadInputDevices();
+            QtCommon::system->ApplySettings();
+        }
     }
 
     if (title_id == Settings::MarioKartWorldProgramId && !asked_recommended_mkw_settings) {
@@ -1978,7 +1980,7 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
                    "Vulkan, 1x resolution, GPU Fast, asynchronous shaders, BC3, conservative VRAM, "
                    "reactive flushing off, FIFO Relaxed VSync, handheld mode, ScaleForce, and "
                    "FXAA.\n\n"
-                   "They apply to Mario Kart World until Lichii is closed. Your saved settings "
+                   "They apply to Mario Kart World until Genesis is closed. Your saved settings "
                    "are not changed."),
                 QMessageBox::Yes | QMessageBox::No, QMessageBox::No) == QMessageBox::Yes;
         LOG_INFO(Config, "MKW recommended settings accepted: {}", use_recommended_mkw_settings);
@@ -4899,7 +4901,7 @@ void MainWindow::OnCheckGraphicsBackend() {
         UISettings::values.gui_force_x11.SetValue(true);
         GraphicsBackend::SetForceX11(true);
         QMessageBox::information(this, tr("Restart Required"),
-                                 tr("Restart Lichii to apply the X11 backend."));
+                                 tr("Restart Genesis to apply the X11 backend."));
     }
 }
 #endif
@@ -5018,8 +5020,8 @@ bool MainWindow::ConfirmClose() {
         UISettings::values.confirm_before_stopping.GetValue() == ConfirmStop::Ask_Based_On_Game)
         return true;
 
-    const auto text = tr("Are you sure you want to close Lichii?");
-    return question(this, tr("Lichii"), text);
+    const auto text = tr("Are you sure you want to close Genesis?");
+    return question(this, tr("Genesis"), text);
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
@@ -5125,7 +5127,7 @@ bool MainWindow::ConfirmChangeGame() {
 
     // Use custom question to link controller navigation
     return question(
-        this, tr("Lichii"),
+        this, tr("Genesis"),
         tr("Are you sure you want to stop the emulation? Any unsaved progress will be lost."),
         QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
 }
@@ -5134,10 +5136,10 @@ bool MainWindow::ConfirmForceLockedExit() {
     if (QtCommon::emu_thread == nullptr)
         return true;
 
-    const auto text = tr("The currently running application has requested Lichii to not exit.\n\n"
+    const auto text = tr("The currently running application has requested Genesis to not exit.\n\n"
                          "Would you like to bypass this and exit anyway?");
 
-    return question(this, tr("Lichii"), text);
+    return question(this, tr("Genesis"), text);
 }
 
 void MainWindow::RequestGameExit() {
