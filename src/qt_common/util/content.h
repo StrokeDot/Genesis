@@ -44,6 +44,7 @@ void InstallFirmwareZip();
 
 // Keys //
 void InstallKeys();
+void AutoDetectKeysAndFirmware();
 
 // Content //
 void VerifyGameContents(const std::string& game_path);

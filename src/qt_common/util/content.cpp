@@ -15,9 +15,11 @@
 
 #include "compress.h"
 #include "common/settings.h"
+#include "core/crypto/key_manager.h"
 #include "core/file_sys/common_funcs.h"
 #include "qt_common/abstract/frontend.h"
 #include "qt_common/abstract/progress.h"
+#include "qt_common/game_list/auto_setup.h"
 #include "qt_common/game_list/scan_index.h"
 #include "qt_common/qt_common.h"
 
@@ -259,6 +261,76 @@ void InstallKeys() {
     default:
         QtCommon::Frontend::Critical(tr("Decryption Keys install failed"), resMsg);
         break;
+    }
+}
+
+void AutoDetectKeysAndFirmware() {
+    const auto keys_dir = Common::FS::GetEdenPath(Common::FS::EdenPath::KeysDir);
+    const auto nand_dir = Common::FS::GetEdenPath(Common::FS::EdenPath::NANDDir);
+    const auto eden_dir = Common::FS::GetEdenPath(Common::FS::EdenPath::EdenDir);
+    const auto registered_dir = nand_dir / "system" / "Contents" / "registered";
+
+    std::error_code ec;
+    const bool need_keys = !std::filesystem::is_regular_file(keys_dir / "prod.keys", ec);
+    const bool need_firmware = GameListAutoSetup::CountFirmwareNcas(registered_dir) < 50;
+
+    if (!need_keys && !need_firmware) {
+        return;
+    }
+
+    auto found = GameListAutoSetup::DetectFromExistingEmulators(eden_dir);
+    const bool search_drives_for_keys = need_keys;
+    const bool search_drives_for_fw = need_firmware;
+    if (search_drives_for_keys || search_drives_for_fw) {
+        auto drive_found = GameListAutoSetup::DetectInRoots(
+            GameListDiscovery::DefaultSearchRoots(), search_drives_for_keys, search_drives_for_fw,
+            std::chrono::milliseconds{2500});
+        if (drive_found.best_keys &&
+            (!found.best_keys ||
+             GameListAutoSetup::IsBetterKeys(*drive_found.best_keys, *found.best_keys))) {
+            found.best_keys = std::move(drive_found.best_keys);
+        }
+        if (drive_found.best_firmware &&
+            (!found.best_firmware ||
+             GameListAutoSetup::IsBetterFirmware(*drive_found.best_firmware,
+                                                 *found.best_firmware))) {
+            found.best_firmware = std::move(drive_found.best_firmware);
+        }
+    }
+
+    bool changed = false;
+
+    if (need_keys && found.best_keys) {
+        std::filesystem::create_directories(keys_dir, ec);
+        std::filesystem::copy_file(found.best_keys->prod_keys_path, keys_dir / "prod.keys",
+                                   std::filesystem::copy_options::overwrite_existing, ec);
+        if (!ec) {
+            LOG_INFO(Frontend, "Auto-detected decryption keys from {}",
+                     Common::FS::PathToUTF8String(found.best_keys->prod_keys_path));
+            if (!found.best_keys->title_keys_path.empty()) {
+                std::error_code tk_ec;
+                std::filesystem::copy_file(found.best_keys->title_keys_path,
+                                           keys_dir / "title.keys",
+                                           std::filesystem::copy_options::overwrite_existing,
+                                           tk_ec);
+            }
+            Core::Crypto::KeyManager::Instance().ReloadKeys();
+            changed = true;
+        }
+    }
+
+    if (need_firmware && found.best_firmware) {
+        const std::size_t copied =
+            GameListAutoSetup::CopyFirmwareNcas(found.best_firmware->directory, registered_dir);
+        if (copied > 0) {
+            LOG_INFO(Frontend, "Auto-detected firmware ({} NCAs) from {}", copied,
+                     Common::FS::PathToUTF8String(found.best_firmware->directory));
+            changed = true;
+        }
+    }
+
+    if (changed && system && vfs) {
+        system->GetFileSystemController().CreateFactories(*vfs);
     }
 }
 

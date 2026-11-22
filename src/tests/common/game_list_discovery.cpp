@@ -9,6 +9,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "qt_common/game_list/auto_setup.h"
 #include "qt_common/game_list/discovery.h"
 #include "qt_common/game_list/scan_index.h"
 
@@ -224,4 +225,44 @@ TEST_CASE("ParseQtGameDirs extracts custom paths and skips virtual NAND entries"
     const auto dirs = GameListDiscovery::ParseQtGameDirs(ini);
     REQUIRE(dirs.size() == 1);
     CHECK(dirs[0] == std::filesystem::path("D:/Switch Games/Switch Games"));
+}
+
+TEST_CASE("AutoSetup selects highest version prod.keys and firmware directory",
+          "[game_list_discovery]") {
+    using namespace GameListAutoSetup;
+
+    CHECK(ExtractSemanticVersion("Firmware.20.3.0") == SemVer{20, 3, 0});
+    CHECK(ExtractSemanticVersion("ProdKeys.net-v18.-1-0") == SemVer{18, 1, 0});
+    CHECK(ExtractSemanticVersion("SwitchProdKeys.net-yuzu-v19.0.1") == SemVer{19, 0, 1});
+    CHECK_FALSE(ExtractSemanticVersion("no_version_here").Valid());
+
+    ScopedTempDir tmp;
+    const auto kf = tmp.path / "Switch emulator" / "Keys + Firmware" / "Keys + Firmware";
+    TouchFile(kf / "ProdKeys.net-v19.0.1" / "prod.keys", 10000);
+    TouchFile(kf / "ProdKeys.net-v20.3.0" / "prod.keys", 12000);
+    TouchFile(kf / "ProdKeys.net-v20.3.0" / "title.keys", 400);
+
+    for (int i = 0; i < 60; ++i) {
+        TouchFile(kf / "Firmware.19.0.1" / ("f" + std::to_string(i) + ".nca"), 16);
+        TouchFile(kf / "Firmware.20.3.0" / ("f" + std::to_string(i) + ".nca"), 16);
+    }
+    TouchFile(kf / "Firmware.19.0.1" / "meta.cnmt.nca", 16);
+    TouchFile(kf / "Firmware.20.3.0" / "meta.cnmt.nca", 16);
+
+    GameListDiscovery::SearchRoot sr{.path = tmp.path, .max_depth = 6, .skip_top = {}};
+    const auto found = DetectInRoots({sr}, true, true, std::chrono::milliseconds{5000});
+
+    REQUIRE(found.best_keys.has_value());
+    CHECK(found.best_keys->version == SemVer{20, 3, 0});
+    CHECK(found.best_keys->prod_keys_path.parent_path().filename() == "ProdKeys.net-v20.3.0");
+    CHECK(found.best_keys->title_keys_path.filename() == "title.keys");
+
+    REQUIRE(found.best_firmware.has_value());
+    CHECK(found.best_firmware->version == SemVer{20, 3, 0});
+    CHECK(found.best_firmware->directory.filename() == "Firmware.20.3.0");
+    CHECK(found.best_firmware->nca_count == 61);
+
+    const auto dest = tmp.path / "dest_registered";
+    CHECK(CopyFirmwareNcas(found.best_firmware->directory, dest) == 61);
+    CHECK(CountFirmwareNcas(dest) == 61);
 }

@@ -456,6 +456,9 @@ MainWindow::MainWindow(bool has_broken_vulkan)
     // Setup content providers.
     QtCommon::SetupContentProviders();
 
+    // Auto-detect keys and firmware if not yet installed
+    QtCommon::Content::AutoDetectKeysAndFirmware();
+
     // Gen keys if necessary
     OnCheckFirmwareDecryption(false);
 
