@@ -5,6 +5,8 @@
 
 #include <QTreeView>
 
+#include "qt_common/game_list/scan_index.h"
+
 class GameListModel;
 
 class GameTree : public QTreeView {
@@ -17,7 +19,9 @@ public:
 
     QString GetLastFilterResultItem() const;
     int FilterClosedResultCount(GameListModel* model);
-    void ApplyFilter(const QString& edit_filter_text, GameListModel* model);
+    void ApplyFilter(const QString& edit_filter_text, GameListModel* model,
+                     GameListIndex::SystemFilter system_filter =
+                         GameListIndex::SystemFilter::All);
 
     void SaveInterfaceLayout();
     void LoadInterfaceLayout();

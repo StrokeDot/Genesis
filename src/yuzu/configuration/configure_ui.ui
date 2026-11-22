@@ -77,6 +77,20 @@
       <item>
        <layout class="QVBoxLayout" name="GeneralVerticalLayout">
         <item>
+         <widget class="QCheckBox" name="auto_detect_games">
+          <property name="text">
+           <string>Auto-Detect Switch Games Across Drives</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QCheckBox" name="show_system">
+          <property name="text">
+           <string>Show System Column (Switch 1 / Switch 2)</string>
+          </property>
+         </widget>
+        </item>
+        <item>
          <widget class="QCheckBox" name="show_add_ons">
           <property name="text">
            <string>Show Add-Ons Column</string>

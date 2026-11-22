@@ -6,14 +6,19 @@
 #include "qt_common/util/game.h"
 
 #include "common/fs/fs.h"
+#include "common/fs/path_util.h"
+#include "common/string_util.h"
 #include "core/hle/service/acc/profile_manager.h"
 #include "frontend_common/content_manager.h"
 #include "frontend_common/data_manager.h"
 #include "frontend_common/firmware_manager.h"
 
 #include "compress.h"
+#include "common/settings.h"
+#include "core/file_sys/common_funcs.h"
 #include "qt_common/abstract/frontend.h"
 #include "qt_common/abstract/progress.h"
+#include "qt_common/game_list/scan_index.h"
 #include "qt_common/qt_common.h"
 
 #include <JlCompress.h>
@@ -571,16 +576,53 @@ void configureFilesystemProvider(const std::string& filepath) {
                                      FileSys::GetCRTypeFromNCAType(FileSys::NCA{file}.GetType()),
                                      program_id, file);
     } else if (res2 == Loader::ResultStatus::Success &&
-               (file_type == Loader::FileType::XCI || file_type == Loader::FileType::NSP)) {
-        const auto nsp = file_type == Loader::FileType::NSP
-                             ? std::make_shared<FileSys::NSP>(file)
-                             : FileSys::XCI{file}.GetSecurePartitionNSP();
-        for (const auto& title : nsp->GetNCAs()) {
-            for (const auto& entry : title.second) {
-                QtCommon::provider->AddEntry(entry.first.first, entry.first.second, title.first,
-                                             entry.second->GetBaseFile());
-            }
+               (file_type == Loader::FileType::XCI || file_type == Loader::FileType::XCZ ||
+                file_type == Loader::FileType::NSP || file_type == Loader::FileType::NSZ)) {
+        void(QtCommon::provider->AddEntriesFromContainer(file));
+    }
+
+    if (res2 == Loader::ResultStatus::Success && program_id != 0) {
+        EnsureTitleContentRegistered(program_id);
+    }
+}
+
+void EnsureTitleContentRegistered(u64 program_id) {
+    if (program_id == 0 || !Settings::values.ext_content_from_game_dirs.GetValue() ||
+        !QtCommon::provider || !QtCommon::vfs) {
+        return;
+    }
+
+    auto& registry = GameListIndex::DeferredContentRegistry::Instance();
+    const auto pending = registry.CollectPendingForTitle(program_id);
+    if (pending.empty()) {
+        return;
+    }
+
+    const u64 base_id = FileSys::GetBaseTitleID(program_id);
+    LOG_INFO(Frontend, "Ensuring {} deferred update/DLC file(s) for title {:016X}",
+             pending.size(), base_id);
+
+    for (const auto& candidate_path : pending) {
+        const auto candidate_file =
+            QtCommon::vfs->OpenFile(candidate_path, FileSys::OpenMode::Read);
+        if (!candidate_file) {
+            registry.MarkRegistered(candidate_path);
+            continue;
         }
+        const auto ext = Common::ToLower(
+            std::string(Common::FS::GetExtensionFromFilename(candidate_path)));
+        if (ext == "nca") {
+            const FileSys::NCA nca{candidate_file};
+            if (nca.GetStatus() == Loader::ResultStatus::Success) {
+                QtCommon::provider->AddEntry(
+                    FileSys::TitleType::Application,
+                    FileSys::GetCRTypeFromNCAType(nca.GetType()), nca.GetTitleId(),
+                    candidate_file);
+            }
+        } else {
+            void(QtCommon::provider->AddEntriesFromContainer(candidate_file));
+        }
+        registry.MarkRegistered(candidate_path);
     }
 }
 

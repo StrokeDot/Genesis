@@ -31,6 +31,8 @@ add_library(qt_common STATIC
     abstract/frontend.h abstract/frontend.cpp
     abstract/progress.h abstract/progress.cpp
 
+    game_list/discovery.h
+    game_list/scan_index.h
     game_list/model.h game_list/model.cpp
     game_list/worker.h game_list/worker.cpp
     game_list/game_list_p.h

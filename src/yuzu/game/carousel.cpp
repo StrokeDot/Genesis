@@ -36,7 +36,8 @@ void GameCarousel::SetModel(GameListModel* model) {
     UpdateIconSize();
 }
 
-void GameCarousel::ApplyFilter(const QString& edit_filter_text, GameListModel* model) {
+void GameCarousel::ApplyFilter(const QString& edit_filter_text, GameListModel* model,
+                               GameListIndex::SystemFilter system_filter) {
     int row_count = model->rowCount();
 
     for (int i = 0; i < row_count; ++i) {
@@ -44,7 +45,7 @@ void GameCarousel::ApplyFilter(const QString& edit_filter_text, GameListModel* m
         if (!item)
             continue;
 
-        if (Yuzu::FilterMatches(edit_filter_text, item)) {
+        if (Yuzu::FilterMatches(edit_filter_text, item, system_filter)) {
             setRowHidden(i, false);
         } else {
             setRowHidden(i, true);

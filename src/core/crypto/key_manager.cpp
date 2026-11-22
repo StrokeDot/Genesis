@@ -561,6 +561,7 @@ KeyManager::KeyManager() {
 }
 
 void KeyManager::ReloadKeys() {
+    std::unique_lock lock{key_mutex};
     // Initialize keys
     const auto keys_dir = Common::FS::GetEdenPath(Common::FS::EdenPath::KeysDir);
     if (!Common::FS::CreateDir(keys_dir))
@@ -686,12 +687,14 @@ void KeyManager::LoadFromFile(const std::filesystem::path& file_path, bool is_ti
 }
 
 bool KeyManager::AreKeysLoaded() const {
+    std::shared_lock lock{key_mutex};
     return !s128_keys.empty() && !s256_keys.empty();
 }
 
 bool KeyManager::BaseDeriveNecessary() const {
+    std::shared_lock lock{key_mutex};
     const auto check_key_existence = [this](auto key_type, u64 index1 = 0, u64 index2 = 0) {
-        return !HasKey(key_type, index1, index2);
+        return !HasKeyUnlocked(key_type, index1, index2);
     };
 
     if (check_key_existence(S256KeyType::Header)) {
@@ -710,36 +713,52 @@ bool KeyManager::BaseDeriveNecessary() const {
     return false;
 }
 
-bool KeyManager::HasKey(S128KeyType id, u64 field1, u64 field2) const {
+bool KeyManager::HasKeyUnlocked(S128KeyType id, u64 field1, u64 field2) const {
     return s128_keys.find({id, field1, field2}) != s128_keys.end();
 }
 
-bool KeyManager::HasKey(S256KeyType id, u64 field1, u64 field2) const {
+bool KeyManager::HasKeyUnlocked(S256KeyType id, u64 field1, u64 field2) const {
     return s256_keys.find({id, field1, field2}) != s256_keys.end();
 }
 
+bool KeyManager::HasKey(S128KeyType id, u64 field1, u64 field2) const {
+    std::shared_lock lock{key_mutex};
+    return HasKeyUnlocked(id, field1, field2);
+}
+
+bool KeyManager::HasKey(S256KeyType id, u64 field1, u64 field2) const {
+    std::shared_lock lock{key_mutex};
+    return HasKeyUnlocked(id, field1, field2);
+}
+
 Key128 KeyManager::GetKey(S128KeyType id, u64 field1, u64 field2) const {
-    if (!HasKey(id, field1, field2)) {
+    std::shared_lock lock{key_mutex};
+    const auto it = s128_keys.find({id, field1, field2});
+    if (it == s128_keys.end()) {
         return {};
     }
-    return s128_keys.at({id, field1, field2});
+    return it->second;
 }
 
 Key256 KeyManager::GetKey(S256KeyType id, u64 field1, u64 field2) const {
-    if (!HasKey(id, field1, field2)) {
+    std::shared_lock lock{key_mutex};
+    const auto it = s256_keys.find({id, field1, field2});
+    if (it == s256_keys.end()) {
         return {};
     }
-    return s256_keys.at({id, field1, field2});
+    return it->second;
 }
 
 Key256 KeyManager::GetBISKey(u8 partition_id) const {
+    std::shared_lock lock{key_mutex};
     Key256 out{};
 
     for (const auto& bis_type : {BISKeyType::Crypto, BISKeyType::Tweak}) {
-        if (HasKey(S128KeyType::BIS, partition_id, u64(bis_type))) {
+        const auto it = s128_keys.find({S128KeyType::BIS, partition_id, u64(bis_type)});
+        if (it != s128_keys.end()) {
             std::memcpy(
                 out.data() + sizeof(Key128) * u64(bis_type),
-                s128_keys.at({S128KeyType::BIS, partition_id, u64(bis_type)}).data(),
+                it->second.data(),
                 sizeof(Key128));
         }
     }
@@ -776,10 +795,9 @@ void KeyManager::WriteKeyToFile(KeyCategory category, std::string_view keyname, 
     }
 
     void(file.WriteString(fmt::format("\n{} = {}", keyname, Common::HexToString(key))));
-    LoadFromFile(path, category == KeyCategory::Title);
 }
 
-void KeyManager::SetKey(S128KeyType id, Key128 key, u64 field1, u64 field2) {
+void KeyManager::SetKeyUnlocked(S128KeyType id, Key128 key, u64 field1, u64 field2) {
     if (s128_keys.find({id, field1, field2}) != s128_keys.end() || key == Key128{}) {
         return;
     }
@@ -830,7 +848,12 @@ void KeyManager::SetKey(S128KeyType id, Key128 key, u64 field1, u64 field2) {
     s128_keys[{id, field1, field2}] = key;
 }
 
-void KeyManager::SetKey(S256KeyType id, Key256 key, u64 field1, u64 field2) {
+void KeyManager::SetKey(S128KeyType id, Key128 key, u64 field1, u64 field2) {
+    std::unique_lock lock{key_mutex};
+    SetKeyUnlocked(id, key, field1, field2);
+}
+
+void KeyManager::SetKeyUnlocked(S256KeyType id, Key256 key, u64 field1, u64 field2) {
     if (s256_keys.find({id, field1, field2}) != s256_keys.end() || key == Key256{}) {
         return;
     }
@@ -842,6 +865,11 @@ void KeyManager::SetKey(S256KeyType id, Key256 key, u64 field1, u64 field2) {
         WriteKeyToFile(KeyCategory::Standard, iter->first, key);
     }
     s256_keys[{id, field1, field2}] = key;
+}
+
+void KeyManager::SetKey(S256KeyType id, Key256 key, u64 field1, u64 field2) {
+    std::unique_lock lock{key_mutex};
+    SetKeyUnlocked(id, key, field1, field2);
 }
 
 bool KeyManager::KeyFileExists(bool title) {
@@ -1061,6 +1089,7 @@ void KeyManager::PopulateTickets() {
 }
 
 void KeyManager::SynthesizeTickets() {
+    std::unique_lock lock{key_mutex};
     for (const auto& key : s128_keys) {
         if (key.first.type == S128KeyType::Titlekey) {
             u128 rights_id{key.first.field1, key.first.field2};
@@ -1137,13 +1166,15 @@ bool KeyManager::AddTicket(const Ticket& ticket) {
     const auto& rid = ticket.GetData().rights_id;
     u128 rights_id;
     std::memcpy(rights_id.data(), rid.data(), rid.size());
+
+    std::unique_lock lock{key_mutex};
     if (ticket.GetData().type == Core::Crypto::TitleKeyType::Common) {
         common_tickets[rights_id] = ticket;
     } else {
         personal_tickets[rights_id] = ticket;
     }
 
-    if (HasKey(S128KeyType::Titlekey, rights_id[1], rights_id[0])) {
+    if (HasKeyUnlocked(S128KeyType::Titlekey, rights_id[1], rights_id[0])) {
         LOG_DEBUG(Crypto,
             "Skipping parsing title key from ticket for known rights ID {:016X}{:016X}.",
             rights_id[1], rights_id[0]);
@@ -1154,7 +1185,7 @@ bool KeyManager::AddTicket(const Ticket& ticket) {
     if (!key) {
         return false;
     }
-    SetKey(S128KeyType::Titlekey, key.value(), rights_id[1], rights_id[0]);
+    SetKeyUnlocked(S128KeyType::Titlekey, key.value(), rights_id[1], rights_id[0]);
     return true;
 }
 } // namespace Core::Crypto

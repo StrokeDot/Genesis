@@ -124,10 +124,12 @@ signals:
 
 private slots:
     void OnTextChanged(const QString& new_text);
+    void OnSystemFilterChanged(int index);
     void OnFilterCloseClicked();
     void OnPopulatingCompleted(const QStringList& watch_list);
 
 private:
+    void ApplyCurrentFilter();
     void SetupViews();
     void SetupScrollAnimation();
     bool eventFilter(QObject* obj, QEvent* event) override;
@@ -140,6 +142,7 @@ private:
     void PopupContextMenu(const QPoint& menu_location);
     void AddGamePopup(QMenu& context_menu, u64 program_id, const std::string& path);
     void AddCustomDirPopup(QMenu& context_menu, QModelIndex selected);
+    void AddAutoDirPopup(QMenu& context_menu, QModelIndex selected);
     void AddPermDirPopup(QMenu& context_menu, QModelIndex selected);
     void AddFavoritesPopup(QMenu& context_menu);
 

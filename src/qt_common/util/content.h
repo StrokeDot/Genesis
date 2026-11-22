@@ -58,6 +58,7 @@ void ImportDataDir(FrontendCommon::DataManager::DataDir dir, const std::string& 
 
 // Loader //
 void configureFilesystemProvider(const std::string& filepath);
+void EnsureTitleContentRegistered(u64 program_id);
 
 // Profiles //
 void FixProfiles();

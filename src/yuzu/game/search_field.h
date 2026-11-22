@@ -5,7 +5,10 @@
 
 #include <QWidget>
 
+#include "qt_common/game_list/scan_index.h"
+
 class GameList;
+class QComboBox;
 class QHBoxLayout;
 class QTreeView;
 class QLabel;
@@ -19,6 +22,7 @@ public:
     explicit GameListSearchField(GameList* parent = nullptr);
 
     QString filterText() const;
+    GameListIndex::SystemFilter systemFilter() const;
     void setFilterResult(int visible_, int total_);
 
     void clear();
@@ -47,6 +51,7 @@ private:
     QTreeView* tree_view = nullptr;
     QLabel* label_filter = nullptr;
     QLineEdit* edit_filter = nullptr;
+    QComboBox* combo_system_filter = nullptr;
     QLabel* label_filter_result = nullptr;
     QToolButton* button_filter_close = nullptr;
 };

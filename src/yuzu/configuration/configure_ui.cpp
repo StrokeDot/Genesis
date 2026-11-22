@@ -108,6 +108,9 @@ ConfigureUi::ConfigureUi(Core::System& system_, QWidget* parent)
     SetConfiguration();
 
     // Force game list reload if any of the relevant settings are changed.
+    connect(ui->auto_detect_games, &QCheckBox::STATE_CHANGED, this,
+            &ConfigureUi::RequestGameListUpdate);
+    connect(ui->show_system, &QCheckBox::STATE_CHANGED, this, &ConfigureUi::RequestGameListUpdate);
     connect(ui->show_add_ons, &QCheckBox::STATE_CHANGED, this, &ConfigureUi::RequestGameListUpdate);
     connect(ui->show_size, &QCheckBox::STATE_CHANGED, this, &ConfigureUi::RequestGameListUpdate);
     connect(ui->show_types, &QCheckBox::STATE_CHANGED, this, &ConfigureUi::RequestGameListUpdate);
@@ -151,6 +154,8 @@ ConfigureUi::~ConfigureUi() = default;
 void ConfigureUi::ApplyConfiguration() {
     UISettings::values.theme =
         ui->theme_combobox->itemData(ui->theme_combobox->currentIndex()).toString().toStdString();
+    UISettings::values.auto_detect_games = ui->auto_detect_games->isChecked();
+    UISettings::values.show_system = ui->show_system->isChecked();
     UISettings::values.show_add_ons = ui->show_add_ons->isChecked();
     UISettings::values.show_size = ui->show_size->isChecked();
     UISettings::values.show_types = ui->show_types->isChecked();
@@ -179,6 +184,8 @@ void ConfigureUi::SetConfiguration() {
         ui->theme_combobox->findData(QString::fromStdString(UISettings::values.theme)));
     ui->language_combobox->setCurrentIndex(ui->language_combobox->findData(
         QString::fromStdString(UISettings::values.language.GetValue())));
+    ui->auto_detect_games->setChecked(UISettings::values.auto_detect_games.GetValue());
+    ui->show_system->setChecked(UISettings::values.show_system.GetValue());
     ui->show_add_ons->setChecked(UISettings::values.show_add_ons.GetValue());
     ui->show_size->setChecked(UISettings::values.show_size.GetValue());
     ui->show_types->setChecked(UISettings::values.show_types.GetValue());

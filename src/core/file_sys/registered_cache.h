@@ -9,7 +9,9 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <vector>
 #include "common/container/unordered_map.h"
@@ -258,6 +260,14 @@ private:
     std::array<ContentProvider*, size_t(ContentProviderUnionSlot::Count)> providers;
 };
 
+struct ContainerScanSummary {
+    bool valid{false};
+    bool is_bootable{false};
+    bool has_updates_or_dlc{false};
+    std::vector<u64> application_program_ids;
+    std::vector<u64> referenced_base_ids;
+};
+
 class ManualContentProvider : public ContentProvider {
 public:
     ~ManualContentProvider() override;
@@ -268,6 +278,9 @@ public:
                              u32 version, const std::string& version_string, VirtualFile file);
     bool AddEntriesFromContainer(VirtualFile file, bool only_content = false,
                                  std::optional<u64> base_program_id = std::nullopt);
+    ContainerScanSummary ScanAndRegisterContainer(VirtualFile file, bool register_entries = true,
+                                                  bool only_content = false,
+                                                  std::optional<u64> base_program_id = std::nullopt);
     void ClearAllEntries();
 
     void Refresh() override;
@@ -284,6 +297,14 @@ public:
     VirtualFile GetEntryForVersion(u64 title_id, ContentRecordType type, u32 version) const;
 
 private:
+    void AddEntryUnlocked(TitleType title_type, ContentRecordType content_type, u64 title_id,
+                          VirtualFile file);
+    void AddEntryWithVersionUnlocked(TitleType title_type, ContentRecordType content_type,
+                                     u64 title_id, u32 version, const std::string& version_string,
+                                     VirtualFile file);
+    VirtualFile GetEntryRawUnlocked(u64 title_id, ContentRecordType type) const;
+
+    mutable std::shared_mutex mutex;
     std::map<std::tuple<TitleType, ContentRecordType, u64>, VirtualFile> entries;
     std::vector<ExternalUpdateEntry> multi_version_entries;
 };

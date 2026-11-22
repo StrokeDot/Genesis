@@ -23,6 +23,7 @@
 #include "common/string_util.h"
 #include "frontend_common/play_time_manager.h"
 #include "qt_common/config/uisettings.h"
+#include "qt_common/game_list/scan_index.h"
 #include "qt_common/qt_common.h"
 
 enum class GameListItemType {
@@ -33,6 +34,7 @@ enum class GameListItemType {
     SysNandDir = QStandardItem::UserType + 5,
     AddDir = QStandardItem::UserType + 6,
     Favorites = QStandardItem::UserType + 7,
+    AutoDetectedDir = QStandardItem::UserType + 8,
 };
 
 Q_DECLARE_METATYPE(GameListItemType);
@@ -80,16 +82,19 @@ public:
     static constexpr int FullPathRole = SortRole + 2;
     static constexpr int ProgramIdRole = SortRole + 3;
     static constexpr int FileTypeRole = SortRole + 4;
+    static constexpr int ConsoleGenerationRole = SortRole + 5;
 
     GameListItemPath() = default;
     GameListItemPath(const QString& game_path, const std::vector<u8>& picture_data,
                      const QString& game_name, const QString& game_type, u64 program_id,
                      u64 play_time, const QString& patch_versions) {
+        const auto console_gen = GameListIndex::ClassifyConsoleGeneration(program_id);
         setData(type(), TypeRole);
         setData(game_path, FullPathRole);
         setData(game_name, TitleRole);
         setData(qulonglong(program_id), ProgramIdRole);
         setData(game_type, FileTypeRole);
+        setData(static_cast<int>(console_gen), ConsoleGenerationRole);
 
         const auto readable_play_time =
             play_time > 0 ? QObject::tr("Play Time: %1")
@@ -108,7 +113,12 @@ public:
             return QObject::tr("Version: 1.0.0");
         }();
 
-        const auto tooltip = QStringLiteral("%1\n%2").arg(readable_play_time, enabled_update);
+        const auto system_line = QObject::tr("System: %1")
+                                     .arg(QString::fromLatin1(
+                                         GameListIndex::ConsoleGenerationLabel(console_gen)));
+
+        const auto tooltip =
+            QStringLiteral("%1\n%2\n%3").arg(system_line, readable_play_time, enabled_update);
 
         setData(tooltip, Qt::ToolTipRole);
 
@@ -296,6 +306,7 @@ public:
 class GameListDir : public GameListItem {
 public:
     static constexpr int GameDirRole = Qt::UserRole + 2;
+    static constexpr int AutoDirPathRole = Qt::UserRole + 3;
 
     explicit GameListDir(UISettings::GameDir& directory,
                          GameListItemType dir_type_ = GameListItemType::CustomDir)
@@ -332,6 +343,16 @@ public:
 
         if (icon_name != nullptr)
             setData(ThemeIcon(icon_name), Qt::DecorationRole);
+    }
+
+    explicit GameListDir(const std::string& auto_dir_path)
+        : dir_type{GameListItemType::AutoDetectedDir} {
+        setData(type(), TypeRole);
+        setData(QVariant(-1), GameDirRole);
+        const QString path = QString::fromStdString(auto_dir_path);
+        setData(path, AutoDirPathRole);
+        setData(QObject::tr("Auto-detected: %1").arg(path), Qt::DisplayRole);
+        setData(ThemeIcon(QFileInfo::exists(path) ? "folder" : "bad_folder"), Qt::DecorationRole);
     }
 
     int type() const override {

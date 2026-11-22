@@ -4,6 +4,7 @@
 // SPDX-FileCopyrightText: 2015 Citra Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <QAbstractItemView>
 #include <QApplication>
 #include <QDir>
@@ -240,20 +241,32 @@ void GameList::ResetViewMode() {
     if (m_isTreeMode != newTreeMode) {
         m_isTreeMode = newTreeMode;
         item_model->SetFlat(!m_isTreeMode);
-        if (!UISettings::values.game_dirs.empty()) {
+        if (!UISettings::values.game_dirs.empty() || UISettings::values.auto_detect_games.GetValue()) {
             item_model->PopulateAsync(UISettings::values.game_dirs);
         }
     }
 }
 
-void GameList::OnTextChanged(const QString& new_text) {
-    const QString edit_filter_text = new_text.toLower();
+void GameList::ApplyCurrentFilter() {
+    const QString edit_filter_text = search_field->filterText().toLower();
+    const auto system_filter = search_field->systemFilter();
 
     if (m_isTreeMode) {
-        tree_view->ApplyFilter(edit_filter_text, item_model);
+        tree_view->ApplyFilter(edit_filter_text, item_model, system_filter);
+    } else if (game_list_mode == Settings::GameListMode::CarouselView) {
+        carousel_view->ApplyFilter(edit_filter_text, item_model, system_filter);
     } else {
-        grid_view->ApplyFilter(edit_filter_text, item_model);
+        grid_view->ApplyFilter(edit_filter_text, item_model, system_filter);
     }
+}
+
+void GameList::OnTextChanged(const QString& /*new_text*/) {
+    ApplyCurrentFilter();
+}
+
+void GameList::OnSystemFilterChanged(int /*index*/) {
+    UISettings::values.system_filter = static_cast<u8>(search_field->systemFilter());
+    ApplyCurrentFilter();
 }
 
 void GameList::OnFilterCloseClicked() {
@@ -284,6 +297,9 @@ void GameList::OnPopulatingCompleted(const QStringList& watch_list) {
                     tree_view->setExpanded(dir_item->index(),
                                            UISettings::values.game_dirs[dir_index].expanded);
                 }
+            } else if (type == GameListItemType::AutoDetectedDir) {
+                tree_view->setExpanded(dir_item->index(),
+                                       UISettings::values.auto_detected_expanded.GetValue());
             }
         }
     }
@@ -340,6 +356,8 @@ void GameList::OnPopulatingCompleted(const QStringList& watch_list) {
     // TODO: carousel/grid impl.
     item_model->sort(tree_view->header()->sortIndicatorSection(),
                      tree_view->header()->sortIndicatorOrder());
+
+    ApplyCurrentFilter();
 
     emit PopulatingCompleted();
 }
@@ -439,6 +457,9 @@ void GameList::PopupContextMenu(const QPoint& menu_location) {
     case GameListItemType::CustomDir:
         AddPermDirPopup(context_menu, selected);
         AddCustomDirPopup(context_menu, selected);
+        break;
+    case GameListItemType::AutoDetectedDir:
+        AddAutoDirPopup(context_menu, selected);
         break;
     case GameListItemType::SdmcDir:
     case GameListItemType::UserNandDir:
@@ -630,6 +651,32 @@ void GameList::AddCustomDirPopup(QMenu& context_menu, QModelIndex selected) {
         UISettings::values.game_dirs.removeOne(game_dir);
         item_model->invisibleRootItem()->removeRow(selected.row());
         OnTextChanged(search_field->filterText());
+    });
+}
+
+void GameList::AddAutoDirPopup(QMenu& context_menu, QModelIndex selected) {
+    const QString auto_path = selected.data(GameListDir::AutoDirPathRole).toString();
+    QAction* open_dir = context_menu.addAction(tr("Open Directory Location"));
+    QAction* exclude_dir = context_menu.addAction(tr("Exclude Auto-Detected Folder"));
+    context_menu.addSeparator();
+    QAction* disable_auto = context_menu.addAction(tr("Disable Auto-Detection"));
+
+    connect(open_dir, &QAction::triggered, this, [this, auto_path] {
+        emit OpenDirectory(auto_path);
+    });
+    connect(exclude_dir, &QAction::triggered, this, [this, auto_path] {
+        const std::string path_str = auto_path.toStdString();
+        auto& excluded = UISettings::values.excluded_auto_game_dirs;
+        if (std::find(excluded.begin(), excluded.end(), path_str) == excluded.end()) {
+            excluded.push_back(path_str);
+        }
+        emit SaveConfig();
+        PopulateAsync(UISettings::values.game_dirs);
+    });
+    connect(disable_auto, &QAction::triggered, this, [this] {
+        UISettings::values.auto_detect_games = false;
+        emit SaveConfig();
+        PopulateAsync(UISettings::values.game_dirs);
     });
 }
 

@@ -1,10 +1,13 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <QFontMetrics>
 #include <QPainter>
 #include <QPainterPath>
 #include "game_card.h"
 #include "qt_common/config/uisettings.h"
+#include "qt_common/game_list/game_list_p.h"
+#include "qt_common/game_list/scan_index.h"
 
 GameCard::GameCard(QObject* parent) : QStyledItemDelegate{parent} {
     setObjectName("GameCard");
@@ -62,6 +65,31 @@ void GameCard::paint(QPainter* painter, const QStyleOptionViewItem& option,
     } else {
         iconRect = {cardRect.left() + cardMargin, cardRect.top() + cardMargin,
                     static_cast<int>(icon_size), static_cast<int>(icon_size)};
+    }
+
+    if (icon_size >= 48) {
+        const int gen_raw = index.data(GameListItemPath::ConsoleGenerationRole).toInt();
+        const bool is_switch2 =
+            gen_raw == static_cast<int>(GameListIndex::ConsoleGeneration::Switch2);
+        const QString badge_text = is_switch2 ? QStringLiteral("SW2") : QStringLiteral("SW1");
+
+        QFont badge_font = option.font;
+        badge_font.setBold(true);
+        badge_font.setPixelSize(10);
+        const QFontMetrics fm(badge_font);
+        const int badge_w = fm.horizontalAdvance(badge_text) + 10;
+        const int badge_h = fm.height() + 4;
+        const QRect badge_rect(iconRect.right() - badge_w - 4, iconRect.top() + 4, badge_w,
+                               badge_h);
+
+        painter->save();
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(is_switch2 ? QColor(37, 99, 235, 225) : QColor(200, 30, 40, 225));
+        painter->drawRoundedRect(badge_rect, 4, 4);
+        painter->setFont(badge_font);
+        painter->setPen(Qt::white);
+        painter->drawText(badge_rect, Qt::AlignCenter, badge_text);
+        painter->restore();
     }
 
     if (UISettings::values.show_game_name.GetValue()) {
