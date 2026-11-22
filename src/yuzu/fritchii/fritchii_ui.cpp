@@ -127,10 +127,12 @@ void Rename(QAction* action, const QString& text) {
 
 bool Enabled() {
     static const bool enabled = [] {
-        if (qEnvironmentVariableIntValue("FRITCHII_CLASSIC_UI") != 0) {
+        if (qEnvironmentVariableIntValue("GENESIS_CLASSIC_UI") != 0 ||
+            qEnvironmentVariableIntValue("FRITCHII_CLASSIC_UI") != 0) {
             return false;
         }
-        return std::string_view{Common::g_build_name} == "Fritchii";
+        const std::string_view name{Common::g_build_name};
+        return name == "Genesis" || name == "Genesis Nightly" || name == "Fritchii";
     }();
     return enabled;
 }
@@ -266,27 +268,15 @@ void RestructureMenus(Ui::MainWindow& ui, QMainWindow& window, const MenuHooks& 
     QObject::connect(export_log, &QAction::triggered, &window, hooks.export_log);
     ui.menu_Help->removeAction(ui.action_Open_Mods_Page);
     QAction* first_help = ui.menu_Help->actions().value(0);
-    auto* whats_new = new QAction(tr("What's &New"), &window);
-    QObject::connect(whats_new, &QAction::triggered, &window, hooks.whats_new);
     auto* delete_cache = new QAction(tr("&Delete Shader Cache..."), &window);
     QObject::connect(delete_cache, &QAction::triggered, &window, hooks.delete_shader_cache);
     ui.menu_Help->insertAction(first_help, export_log);
     ui.menu_Help->insertAction(first_help, ui.action_Log_Folder);
     ui.menu_Help->insertAction(first_help, delete_cache);
     ui.menu_Help->insertSeparator(first_help);
-    ui.menu_Help->insertAction(first_help, whats_new);
-    auto* discord = new QAction(Icon(QStringLiteral("community"), 16), tr("Fritchii &Discord"), &window);
-    QObject::connect(discord, &QAction::triggered, &window, [] { OpenDiscord(); });
-    auto* donate = new QAction(Icon(QStringLiteral("heart"), 16), tr("D&onate"), &window);
-    QObject::connect(donate, &QAction::triggered, &window, [] { OpenDonate(); });
-    ui.menu_Help->insertAction(first_help, discord);
-    ui.menu_Help->insertAction(first_help, donate);
-    // v5.8.1: copy a profile again after the first launch's automatic import (a player whose
-    // newest saves were in Lichii 150+'s folder got the older eden copy).
     auto* copy_data = new QAction(tr("&Copy Data from Eden or Lichii..."), &window);
     QObject::connect(copy_data, &QAction::triggered, &window, [&window] { CopyDataFromOldFolder(window); });
     ui.menu_Help->insertAction(first_help, copy_data);
-    // v5.8.3: export, import and copy saves between Fritchii, Eden and Lichii.
     auto* saves = new QAction(tr("Sa&ves..."), &window);
     QObject::connect(saves, &QAction::triggered, &window, [&window] {
         ShowSavesWindow(&window,
@@ -329,7 +319,7 @@ void RestructureMenus(Ui::MainWindow& ui, QMainWindow& window, const MenuHooks& 
     Rename(ui.action_Load_Amiibo, tr("&Load or Remove Amiibo..."));
     Rename(ui.action_Firmware_From_Folder, tr("From &Folder..."));
     Rename(ui.action_Firmware_From_ZIP, tr("From &ZIP..."));
-    Rename(ui.action_About, tr("&About Fritchii"));
+    Rename(ui.action_About, tr("&About Genesis"));
     Rename(ui.action_Eden_Dependencies, tr("&Open-Source Components"));
 }
 
@@ -559,16 +549,16 @@ void CopyDataFromOldFolder(QMainWindow& window) {
     namespace fs = std::filesystem;
     using namespace Common::FS;
     if (IsPortableMode()) {
-        QMessageBox::information(&window, QStringLiteral("Fritchii"),
-                                 QObject::tr("This Fritchii keeps its data in the user folder next to "
-                                    "fritchii.exe."));
+        QMessageBox::information(&window, QStringLiteral("Genesis"),
+                                 QObject::tr("This Genesis build keeps its data in the user folder next to "
+                                    "genesis.exe."));
         return;
     }
     const bool any = std::ranges::any_of(
         std::array{LegacyEdenDir, LichiiDir, YuzuDir, SuyuDir, SudachiDir, CitronDir},
         [](EmuPath path) { return fs::is_directory(GetLegacyPath(path)); });
     if (!any) {
-        QMessageBox::information(&window, QStringLiteral("Fritchii"),
+        QMessageBox::information(&window, QStringLiteral("Genesis"),
                                  QObject::tr("No eden or lichii folder was found in %APPDATA%."));
         return;
     }
@@ -580,7 +570,7 @@ void CopyDataFromOldFolder(QMainWindow& window) {
     try {
         FrontendCommon::RequestProfileImport(choice->Serialize());
     } catch (const std::exception& error) {
-        QMessageBox::warning(&window, QStringLiteral("Fritchii"), QString::fromUtf8(error.what()));
+        QMessageBox::warning(&window, QStringLiteral("Genesis"), QString::fromUtf8(error.what()));
         return;
     }
     // The copy runs when Fritchii starts, before anything reads the settings.

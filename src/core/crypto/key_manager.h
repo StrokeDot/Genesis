@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// SPDX-FileCopyrightText: Copyright 2018 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
@@ -8,7 +9,9 @@
 #include <array>
 #include <filesystem>
 #include <map>
+#include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <span>
 #include <string>
 
@@ -327,8 +330,15 @@ private:
     void SetKeyWrapped(S128KeyType id, Key128 key, u64 field1 = 0, u64 field2 = 0);
     void SetKeyWrapped(S256KeyType id, Key256 key, u64 field1 = 0, u64 field2 = 0);
 
+    bool HasKeyUnlocked(S128KeyType id, u64 field1 = 0, u64 field2 = 0) const;
+    bool HasKeyUnlocked(S256KeyType id, u64 field1 = 0, u64 field2 = 0) const;
+    void SetKeyUnlocked(S128KeyType id, Key128 key, u64 field1 = 0, u64 field2 = 0);
+    void SetKeyUnlocked(S256KeyType id, Key256 key, u64 field1 = 0, u64 field2 = 0);
+
     /// Parses the title key section of a ticket.
     std::optional<Key128> ParseTicketTitleKey(const Ticket& ticket);
+
+    mutable std::shared_mutex key_mutex;
 };
 
 Key128 GenerateKeyEncryptionKey(Key128 source, Key128 master, Key128 kek_seed, Key128 key_seed);

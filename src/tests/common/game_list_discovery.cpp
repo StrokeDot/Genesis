@@ -1,0 +1,331 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#include <algorithm>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <vector>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include "qt_common/game_list/artwork.h"
+#include "qt_common/game_list/auto_setup.h"
+#include "qt_common/game_list/discovery.h"
+#include "qt_common/game_list/scan_index.h"
+
+namespace {
+
+struct ScopedTempDir {
+    std::filesystem::path path;
+
+    ScopedTempDir() {
+        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        path = std::filesystem::temp_directory_path() /
+               ("genesis_discovery_test_" + std::to_string(stamp));
+        std::filesystem::create_directories(path);
+    }
+
+    ~ScopedTempDir() {
+        std::error_code ec;
+        std::filesystem::remove_all(path, ec);
+    }
+};
+
+void TouchFile(const std::filesystem::path& file_path, std::size_t size_bytes = 16) {
+    std::filesystem::create_directories(file_path.parent_path());
+    std::ofstream out(file_path, std::ios::binary | std::ios::trunc);
+    if (size_bytes > 0) {
+        std::string buf(size_bytes, '\0');
+        out.write(buf.data(), static_cast<std::streamsize>(buf.size()));
+    }
+}
+
+} // namespace
+
+TEST_CASE("Console generation classification distinguishes Switch 1 and Switch 2",
+          "[game_list_discovery]") {
+    using namespace GameListIndex;
+
+    CHECK(ClassifyConsoleGeneration(0x0100152000022000ULL) == ConsoleGeneration::Switch1);
+    CHECK(ClassifyConsoleGeneration(0x01006A800016E000ULL) == ConsoleGeneration::Switch1);
+    CHECK(ClassifyConsoleGeneration(0x0000000000000000ULL) == ConsoleGeneration::Switch1);
+    CHECK(ClassifyConsoleGeneration(0x0400C3F00006E000ULL) == ConsoleGeneration::Switch2);
+    CHECK(ClassifyConsoleGeneration(0x040074A01BF12000ULL) == ConsoleGeneration::Switch2);
+
+    CHECK(MatchesSystemFilter(SystemFilter::All, ConsoleGeneration::Switch1));
+    CHECK(MatchesSystemFilter(SystemFilter::All, ConsoleGeneration::Switch2));
+    CHECK(MatchesSystemFilter(SystemFilter::Switch1, ConsoleGeneration::Switch1));
+    CHECK_FALSE(MatchesSystemFilter(SystemFilter::Switch1, ConsoleGeneration::Switch2));
+    CHECK(MatchesSystemFilter(SystemFilter::Switch2, ConsoleGeneration::Switch2));
+    CHECK_FALSE(MatchesSystemFilter(SystemFilter::Switch2, ConsoleGeneration::Switch1));
+}
+
+TEST_CASE("Filename title ID extraction and extra-file priority heuristic",
+          "[game_list_discovery]") {
+    using namespace GameListIndex;
+
+    CHECK(ExtractTitleIdFromFilename("Mario Tennis Aces[0100BDE00862A000][US][v0].nsp") ==
+          0x0100BDE00862A000ULL);
+    CHECK(ExtractTitleIdFromFilename("Mario Tennis Aces[0100BDE00862A800][US][v786432].nsp") ==
+          0x0100BDE00862A800ULL);
+    CHECK(ExtractTitleIdFromFilename("Super Smash Bros Ultimate [DLC-73] [01006A800016F049].nsp") ==
+          0x01006A800016F049ULL);
+    CHECK_FALSE(ExtractTitleIdFromFilename("Kirby and the Forgotten Land.xci").has_value());
+
+    constexpr u64 BigGame = 2ULL << 30;
+    constexpr u64 TinyDlc = 128ULL << 10;
+
+    CHECK_FALSE(IsLikelyDeferredExtra("Games/Kirby and the Forgotten Land.xci", BigGame));
+    CHECK_FALSE(
+        IsLikelyDeferredExtra("Games/Mario Tennis Aces[0100BDE00862A000][US][v0].nsp", BigGame));
+    CHECK(IsLikelyDeferredExtra("Games/Mario Tennis Aces[0100BDE00862A800][US][v786432].nsp",
+                                BigGame));
+    CHECK(IsLikelyDeferredExtra("Games/DLC + Updates/Something.nsp", BigGame));
+    CHECK(IsLikelyDeferredExtra("Games/Zelda Expansion Pass DLC 2.nsp", TinyDlc));
+    CHECK(IsLikelyDeferredExtra("Games/UnknownUnlocker.nsp", TinyDlc));
+}
+
+TEST_CASE("PersistentScanIndex saves, reloads, validates stamps, and prunes missing entries",
+          "[game_list_discovery]") {
+    using namespace GameListIndex;
+
+    ScopedTempDir tmp;
+    const auto index_file = tmp.path / "scan_index_v1.bin";
+    const auto game_file = tmp.path / "Switch Games" / "BotW.xci";
+    const auto upd_file = tmp.path / "Switch Games" / "BotW_Update.nsp";
+
+    PersistentScanIndex writer;
+    writer.SetAutoDetectedDirs({(tmp.path / "Switch Games").string()});
+
+    FileIndexEntry base_entry;
+    base_entry.path = game_file.string();
+    base_entry.file_size = 14880000000ULL;
+    base_entry.mtime_ns = 1700000000000000000LL;
+    base_entry.file_type = 4;
+    base_entry.is_bootable = true;
+    base_entry.titles.push_back(TitleRecord{
+        .program_id = 0x01007EF00011E000ULL,
+        .name = "The Legend of Zelda: Breath of the Wild",
+        .file_type_str = "XCI",
+        .romfs_updatable = true,
+        .generation = ConsoleGeneration::Switch1,
+    });
+    base_entry.referenced_base_ids = {0x01007EF00011E000ULL};
+    writer.Upsert(game_file, base_entry);
+
+    FileIndexEntry upd_entry;
+    upd_entry.path = upd_file.string();
+    upd_entry.file_size = 930000000ULL;
+    upd_entry.mtime_ns = 1700000000000000001LL;
+    upd_entry.file_type = 5;
+    upd_entry.is_bootable = false;
+    upd_entry.has_updates_or_dlc = true;
+    upd_entry.referenced_base_ids = {0x01007EF00011E000ULL};
+    writer.Upsert(upd_file, upd_entry);
+
+    REQUIRE(writer.Save(index_file));
+
+    PersistentScanIndex reader;
+    REQUIRE(reader.Load(index_file));
+    REQUIRE(reader.AutoDetectedDirs().size() == 1);
+    CHECK(reader.Size() == 2);
+
+    const auto* hit = reader.FindMatching(game_file, base_entry.file_size, base_entry.mtime_ns);
+    REQUIRE(hit != nullptr);
+    CHECK(hit->is_bootable);
+    REQUIRE(hit->titles.size() == 1);
+    CHECK(hit->titles[0].program_id == 0x01007EF00011E000ULL);
+    CHECK(hit->titles[0].name == "The Legend of Zelda: Breath of the Wild");
+
+    // Modified size or mtime must miss cache.
+    CHECK(reader.FindMatching(game_file, base_entry.file_size + 1, base_entry.mtime_ns) == nullptr);
+    CHECK(reader.FindMatching(game_file, base_entry.file_size, base_entry.mtime_ns + 1) == nullptr);
+
+    std::unordered_set<std::string> live{NormalizePathKey(game_file)};
+    reader.PruneMissing(live);
+    CHECK(reader.Size() == 1);
+    CHECK(reader.FindMatching(upd_file, upd_entry.file_size, upd_entry.mtime_ns) == nullptr);
+}
+
+TEST_CASE("DeferredContentRegistry tracks updates and DLC by base title ID",
+          "[game_list_discovery]") {
+    using namespace GameListIndex;
+
+    auto& reg = DeferredContentRegistry::Instance();
+    reg.Clear();
+
+    const u64 botw_base = 0x01007EF00011E000ULL;
+    const u64 botw_update = 0x01007EF00011E800ULL;
+    const u64 botw_dlc = 0x01007EF00011F001ULL;
+    const u64 mk8_update = 0x0100152000022800ULL;
+
+    reg.TrackCandidate("D:/Games/botw_upd.nsp", {botw_update});
+    reg.TrackCandidate("D:/Games/botw_dlc.nsp", {botw_dlc});
+    reg.TrackCandidate("D:/Games/mk8_upd.nsp", {mk8_update});
+    reg.TrackCandidate("D:/Games/unlabeled_extra.nsp", {});
+
+    auto pending = reg.CollectPendingForTitle(botw_base);
+    CHECK(pending.size() == 3);
+    CHECK(std::find(pending.begin(), pending.end(), "D:/Games/mk8_upd.nsp") == pending.end());
+
+    reg.MarkRegistered("D:/Games/botw_upd.nsp");
+    reg.MarkRegistered("D:/Games/unlabeled_extra.nsp");
+    pending = reg.CollectPendingForTitle(botw_base);
+    REQUIRE(pending.size() == 1);
+    CHECK(pending[0] == "D:/Games/botw_dlc.nsp");
+
+    reg.Clear();
+}
+
+TEST_CASE("AutoDetectRoots finds Switch folders, collapses nested dirs, and skips system paths",
+          "[game_list_discovery]") {
+    ScopedTempDir tmp;
+    const auto root = tmp.path;
+
+    const auto games = root / "Switch Games" / "Switch Games";
+    TouchFile(games / "Kirby and the Forgotten Land.xci");
+    TouchFile(games / "Zelda" / "Breath of the Wild.xci");
+    TouchFile(games / "DLC + Updates" / "Update [0100BDE00862A800].nsp");
+    TouchFile(games / "LooseGame" / "romfs" / "ignored.nsp");
+    TouchFile(root / "Windows" / "System32" / "fake.nsp");
+    TouchFile(root / "ExcludedTop" / "secret.xci");
+
+    const auto loose = root / "LooseDumpTitle";
+    TouchFile(loose / "exefs" / "main");
+    TouchFile(loose / "exefs" / "main.npdm");
+
+    GameListDiscovery::SearchRoot sr{
+        .path = root,
+        .max_depth = 6,
+        .skip_top = {"excludedtop"},
+    };
+    const auto found = GameListDiscovery::AutoDetectRoots(
+        {sr}, std::chrono::milliseconds{5000}, [] { return false; });
+
+    // Switch Games/Switch Games collapses Zelda underneath it, LooseDumpTitle is found via exefs,
+    // Windows and ExcludedTop are skipped.
+    REQUIRE(found.size() == 2);
+    CHECK(GameListDiscovery::IsPathCoveredByAny(games / "Zelda", found));
+    CHECK(GameListDiscovery::IsPathCoveredByAny(loose, found));
+    CHECK_FALSE(GameListDiscovery::IsPathCoveredByAny(root / "Windows", found));
+    CHECK_FALSE(GameListDiscovery::IsPathCoveredByAny(root / "ExcludedTop", found));
+}
+
+TEST_CASE("ParseQtGameDirs extracts custom paths and skips virtual NAND entries",
+          "[game_list_discovery]") {
+    const std::string ini =
+        "[UI]\n"
+        "Paths\\gamedirs\\1\\path=SDMC\n"
+        "Paths\\gamedirs\\2\\path=UserNAND\n"
+        "Paths\\gamedirs\\3\\path=SysNAND\n"
+        "Paths\\gamedirs\\4\\path=D:/Switch Games/Switch Games\n"
+        "Paths\\gamedirs\\4\\path\\default=false\n"
+        "Paths\\gamedirs\\size=4\n";
+
+    const auto dirs = GameListDiscovery::ParseQtGameDirs(ini);
+    REQUIRE(dirs.size() == 1);
+    CHECK(dirs[0] == std::filesystem::path("D:/Switch Games/Switch Games"));
+
+    // Discover must skip hidden dot-directories (e.g. .longshot_exefs) and romfs trees.
+    ScopedTempDir tmp;
+    TouchFile(tmp.path / "Game" / "exefs" / "main");
+    TouchFile(tmp.path / "Game" / "exefs" / "main.npdm");
+    TouchFile(tmp.path / "Game" / "romfs" / "nested" / "junk.nro");
+    TouchFile(tmp.path / "Port" / ".longshot_exefs" / "main");
+    TouchFile(tmp.path / "Port" / ".longshot_exefs" / "main.npdm");
+
+    const auto disc = GameListDiscovery::Discover(
+        tmp.path, true,
+        [](const std::filesystem::path& p) {
+            return p.filename() == "main" || p.extension() == ".nro";
+        },
+        [] { return false; });
+    REQUIRE(disc.files.size() == 1);
+    CHECK(disc.files[0] == tmp.path / "Game" / "exefs" / "main");
+}
+
+TEST_CASE("AutoSetup selects highest version prod.keys and firmware directory",
+          "[game_list_discovery]") {
+    using namespace GameListAutoSetup;
+
+    CHECK(ExtractSemanticVersion("Firmware.20.3.0") == SemVer{20, 3, 0});
+    CHECK(ExtractSemanticVersion("ProdKeys.net-v18.-1-0") == SemVer{18, 1, 0});
+    CHECK(ExtractSemanticVersion("SwitchProdKeys.net-yuzu-v19.0.1") == SemVer{19, 0, 1});
+    CHECK_FALSE(ExtractSemanticVersion("no_version_here").Valid());
+
+    ScopedTempDir tmp;
+    const auto kf = tmp.path / "Switch emulator" / "Keys + Firmware" / "Keys + Firmware";
+    TouchFile(kf / "ProdKeys.net-v19.0.1" / "prod.keys", 10000);
+    TouchFile(kf / "ProdKeys.net-v20.3.0" / "prod.keys", 12000);
+    TouchFile(kf / "ProdKeys.net-v20.3.0" / "title.keys", 400);
+
+    for (int i = 0; i < 60; ++i) {
+        TouchFile(kf / "Firmware.19.0.1" / ("f" + std::to_string(i) + ".nca"), 16);
+        TouchFile(kf / "Firmware.20.3.0" / ("f" + std::to_string(i) + ".nca"), 16);
+    }
+    TouchFile(kf / "Firmware.19.0.1" / "meta.cnmt.nca", 16);
+    TouchFile(kf / "Firmware.20.3.0" / "meta.cnmt.nca", 16);
+
+    GameListDiscovery::SearchRoot sr{.path = tmp.path, .max_depth = 6, .skip_top = {}};
+    const auto found = DetectInRoots({sr}, true, true, std::chrono::milliseconds{5000});
+
+    REQUIRE(found.best_keys.has_value());
+    CHECK(found.best_keys->version == SemVer{20, 3, 0});
+    CHECK(found.best_keys->prod_keys_path.parent_path().filename() == "ProdKeys.net-v20.3.0");
+    CHECK(found.best_keys->title_keys_path.filename() == "title.keys");
+
+    REQUIRE(found.best_firmware.has_value());
+    CHECK(found.best_firmware->version == SemVer{20, 3, 0});
+    CHECK(found.best_firmware->directory.filename() == "Firmware.20.3.0");
+    CHECK(found.best_firmware->nca_count == 61);
+
+    const auto dest = tmp.path / "dest_registered";
+    CHECK(CopyFirmwareNcas(found.best_firmware->directory, dest) == 61);
+    CHECK(CountFirmwareNcas(dest) == 61);
+}
+
+TEST_CASE("GameVaultArtCache resolves local cover, title ID, library title, and Switch 2 alias",
+          "[game_list_discovery]") {
+    using namespace QtCommon::GameList;
+
+    ScopedTempDir tmp;
+    const auto gv = tmp.path / "gamevault";
+    const auto oot_art = gv / "art" / "pc_oot123";
+    const auto mkw_art = gv / "art" / "pc_mkw456";
+    TouchFile(oot_art / "cover.jpg", 64);
+    {
+        std::ofstream out(oot_art / "titleid.txt");
+        out << "0400486024DEC000\n";
+    }
+    TouchFile(mkw_art / "cover.jpg", 128);
+    {
+        std::ofstream out(gv / "library.json");
+        out << R"([
+            {"id": "pc:oot123", "title": "The Legend of Zelda: Ocarina of Time", "romPath": ""},
+            {"id": "pc:mkw456", "title": "Mario Kart World", "romPath": ""}
+        ])";
+    }
+
+    const auto cache = GameVaultArtCache::LoadFromRoot(gv);
+    REQUIRE_FALSE(cache.Empty());
+
+    // By titleid.txt
+    const auto oot_found = cache.FindArt(0x0400486024DEC000ULL, "", tmp.path / "oot.nup");
+    REQUIRE(oot_found.has_value());
+    CHECK(*oot_found == oot_art / "cover.jpg");
+
+    // By Switch 2 known title ID alias even when folder is named differently
+    const auto mkw_found = cache.FindArt(0x0400C3F00006E000ULL, "Mario Kart New built",
+                                         tmp.path / "Mario Kart New built" / "exefs" / "main");
+    REQUIRE(mkw_found.has_value());
+    CHECK(*mkw_found == mkw_art / "cover.jpg");
+
+    // Local cover next to loose dump exefs parent overrides GameVault
+    const auto loose_main = tmp.path / "CustomGame" / "exefs" / "main";
+    TouchFile(loose_main, 16);
+    TouchFile(tmp.path / "CustomGame" / "icon.png", 32);
+    const auto local_found = cache.FindArt(0x0400C3F00006E000ULL, "Mario Kart World", loose_main);
+    REQUIRE(local_found.has_value());
+    CHECK(*local_found == tmp.path / "CustomGame" / "icon.png");
+}

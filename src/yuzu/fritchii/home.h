@@ -8,6 +8,7 @@
 #include "common/common_types.h"
 
 class QBoxLayout;
+class QComboBox;
 class QHBoxLayout;
 class QLabel;
 class QMainWindow;
@@ -16,6 +17,7 @@ class QPushButton;
 class QStandardItemModel;
 class QTimer;
 class QToolButton;
+class QVBoxLayout;
 
 namespace FritchiiUi {
 
@@ -71,11 +73,13 @@ private:
     QWidget* rail = nullptr;
     QWidget* page = nullptr;
     QToolButton* library_button = nullptr;
+    QComboBox* system_filter_combo = nullptr;
     QLabel* cover = nullptr;
+    QLabel* system_badge = nullptr;
     QLabel* title = nullptr;
     QPushButton* play = nullptr;
-    QHBoxLayout* row = nullptr;
-    QWidget* row_box = nullptr;
+    QVBoxLayout* sections_layout = nullptr;
+    QWidget* sections_box = nullptr;
     QTimer* refresh_timer = nullptr;
 
     bool list_mode = false;

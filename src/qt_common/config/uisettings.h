@@ -192,6 +192,7 @@ struct Values {
     std::string game_dir_deprecated;
     bool game_dir_deprecated_deepscan;
     QVector<GameDir> game_dirs;
+    std::vector<std::string> excluded_auto_game_dirs;
     QStringList recent_files;
     Setting<std::string> language{linkage, {}, "language", Category::Paths};
 
@@ -240,6 +241,10 @@ struct Values {
 
     std::atomic_bool is_game_list_reload_pending{false};
     Setting<bool> cache_game_list{linkage, true, "cache_game_list", Category::UiGameList};
+    Setting<bool> auto_detect_games{linkage, true, "auto_detect_games", Category::UiGameList};
+    Setting<bool> auto_detected_expanded{linkage, true, "auto_detected_expanded",
+                                         Category::UiGameList};
+    Setting<u8> system_filter{linkage, 0, "system_filter", Category::UiGameList};
     Setting<bool> favorites_expanded{linkage, true, "favorites_expanded", Category::UiGameList};
     QVector<u64> favorited_ids;
     QMap<u64, QDir> ryujinx_link_paths;
@@ -254,7 +259,8 @@ struct Values {
     // before the settings load: keep the name and the category.
     Setting<bool> profiling_mode{linkage, false, "profiling_mode", Category::Ui};
 
-    // Size & File Types Column
+    // Size, System & File Types Column
+    Setting<bool> show_system{linkage, true, "show_system", Category::UiGameList};
     Setting<bool> show_size{linkage, true, "show_size", Category::UiGameList};
     Setting<bool> show_types{linkage, true, "show_types", Category::UiGameList};
 

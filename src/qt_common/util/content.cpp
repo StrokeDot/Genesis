@@ -6,14 +6,21 @@
 #include "qt_common/util/game.h"
 
 #include "common/fs/fs.h"
+#include "common/fs/path_util.h"
+#include "common/string_util.h"
 #include "core/hle/service/acc/profile_manager.h"
 #include "frontend_common/content_manager.h"
 #include "frontend_common/data_manager.h"
 #include "frontend_common/firmware_manager.h"
 
 #include "compress.h"
+#include "common/settings.h"
+#include "core/crypto/key_manager.h"
+#include "core/file_sys/common_funcs.h"
 #include "qt_common/abstract/frontend.h"
 #include "qt_common/abstract/progress.h"
+#include "qt_common/game_list/auto_setup.h"
+#include "qt_common/game_list/scan_index.h"
 #include "qt_common/qt_common.h"
 
 #include <JlCompress.h>
@@ -192,7 +199,7 @@ QString UnzipFirmwareToTmp(const QString& location) {
 
     QFile zip(location);
 
-    // TODO: use QtCompress
+    // TODO(crueter): use QtCompress
     QStringList result = JlCompress::extractDir(&zip, qCacheDir);
     if (result.isEmpty()) {
         return QString();
@@ -254,6 +261,76 @@ void InstallKeys() {
     default:
         QtCommon::Frontend::Critical(tr("Decryption Keys install failed"), resMsg);
         break;
+    }
+}
+
+void AutoDetectKeysAndFirmware() {
+    const auto keys_dir = Common::FS::GetEdenPath(Common::FS::EdenPath::KeysDir);
+    const auto nand_dir = Common::FS::GetEdenPath(Common::FS::EdenPath::NANDDir);
+    const auto eden_dir = Common::FS::GetEdenPath(Common::FS::EdenPath::EdenDir);
+    const auto registered_dir = nand_dir / "system" / "Contents" / "registered";
+
+    std::error_code ec;
+    const bool need_keys = !std::filesystem::is_regular_file(keys_dir / "prod.keys", ec);
+    const bool need_firmware = GameListAutoSetup::CountFirmwareNcas(registered_dir) < 50;
+
+    if (!need_keys && !need_firmware) {
+        return;
+    }
+
+    auto found = GameListAutoSetup::DetectFromExistingEmulators(eden_dir);
+    const bool search_drives_for_keys = need_keys;
+    const bool search_drives_for_fw = need_firmware;
+    if (search_drives_for_keys || search_drives_for_fw) {
+        auto drive_found = GameListAutoSetup::DetectInRoots(
+            GameListDiscovery::DefaultSearchRoots(), search_drives_for_keys, search_drives_for_fw,
+            std::chrono::milliseconds{2500});
+        if (drive_found.best_keys &&
+            (!found.best_keys ||
+             GameListAutoSetup::IsBetterKeys(*drive_found.best_keys, *found.best_keys))) {
+            found.best_keys = std::move(drive_found.best_keys);
+        }
+        if (drive_found.best_firmware &&
+            (!found.best_firmware ||
+             GameListAutoSetup::IsBetterFirmware(*drive_found.best_firmware,
+                                                 *found.best_firmware))) {
+            found.best_firmware = std::move(drive_found.best_firmware);
+        }
+    }
+
+    bool changed = false;
+
+    if (need_keys && found.best_keys) {
+        std::filesystem::create_directories(keys_dir, ec);
+        std::filesystem::copy_file(found.best_keys->prod_keys_path, keys_dir / "prod.keys",
+                                   std::filesystem::copy_options::overwrite_existing, ec);
+        if (!ec) {
+            LOG_INFO(Frontend, "Auto-detected decryption keys from {}",
+                     Common::FS::PathToUTF8String(found.best_keys->prod_keys_path));
+            if (!found.best_keys->title_keys_path.empty()) {
+                std::error_code tk_ec;
+                std::filesystem::copy_file(found.best_keys->title_keys_path,
+                                           keys_dir / "title.keys",
+                                           std::filesystem::copy_options::overwrite_existing,
+                                           tk_ec);
+            }
+            Core::Crypto::KeyManager::Instance().ReloadKeys();
+            changed = true;
+        }
+    }
+
+    if (need_firmware && found.best_firmware) {
+        const std::size_t copied =
+            GameListAutoSetup::CopyFirmwareNcas(found.best_firmware->directory, registered_dir);
+        if (copied > 0) {
+            LOG_INFO(Frontend, "Auto-detected firmware ({} NCAs) from {}", copied,
+                     Common::FS::PathToUTF8String(found.best_firmware->directory));
+            changed = true;
+        }
+    }
+
+    if (changed && system && vfs) {
+        system->GetFileSystemController().CreateFactories(*vfs);
     }
 }
 
@@ -326,14 +403,17 @@ void FixProfiles() {
     QtCommon::Frontend::Critical(
         tr("Orphaned Profiles Detected!"),
         tr("UNEXPECTED BAD THINGS MAY HAPPEN IF YOU DON'T READ THIS!<br>"
-           "Fritchii has detected the following save directories with no attached profile:<br>"
+           "Eden has detected the following save directories with no attached profile:<br>"
            "%1<br><br>"
            "The following profiles are valid:<br>"
            "%2<br><br>"
            "Click \"OK\" to open your save folder and fix up your profiles.<br>"
            "Hint: copy the contents of the largest or last-modified folder elsewhere, "
            "delete all orphaned profiles, and move your copied contents to the good "
-           "profile.<br>")
+           "profile.<br><br>"
+           "Still confused? See the <a "
+           "href='https://git.eden-emu.dev/eden-emu/eden/src/branch/master/docs/user/"
+           "Orphaned.md'>help page</a>.<br>")
             .arg(qorphaned, qgood));
 
     QtCommon::Game::OpenSaveFolder();
@@ -495,7 +575,7 @@ bool CheckKeys() {
     if (!ContentManager::AreKeysPresent()) {
         QtCommon::Frontend::Information(
             tr("Keys not installed"),
-            tr("Install decryption keys and restart Fritchii before attempting to install firmware."));
+            tr("Install decryption keys and restart Eden before attempting to install firmware."));
         return false;
     }
 
@@ -568,16 +648,53 @@ void configureFilesystemProvider(const std::string& filepath) {
                                      FileSys::GetCRTypeFromNCAType(FileSys::NCA{file}.GetType()),
                                      program_id, file);
     } else if (res2 == Loader::ResultStatus::Success &&
-               (file_type == Loader::FileType::XCI || file_type == Loader::FileType::NSP)) {
-        const auto nsp = file_type == Loader::FileType::NSP
-                             ? std::make_shared<FileSys::NSP>(file)
-                             : FileSys::XCI{file}.GetSecurePartitionNSP();
-        for (const auto& title : nsp->GetNCAs()) {
-            for (const auto& entry : title.second) {
-                QtCommon::provider->AddEntry(entry.first.first, entry.first.second, title.first,
-                                             entry.second->GetBaseFile());
-            }
+               (file_type == Loader::FileType::XCI || file_type == Loader::FileType::XCZ ||
+                file_type == Loader::FileType::NSP || file_type == Loader::FileType::NSZ)) {
+        void(QtCommon::provider->AddEntriesFromContainer(file));
+    }
+
+    if (res2 == Loader::ResultStatus::Success && program_id != 0) {
+        EnsureTitleContentRegistered(program_id);
+    }
+}
+
+void EnsureTitleContentRegistered(u64 program_id) {
+    if (program_id == 0 || !Settings::values.ext_content_from_game_dirs.GetValue() ||
+        !QtCommon::provider || !QtCommon::vfs) {
+        return;
+    }
+
+    auto& registry = GameListIndex::DeferredContentRegistry::Instance();
+    const auto pending = registry.CollectPendingForTitle(program_id);
+    if (pending.empty()) {
+        return;
+    }
+
+    const u64 base_id = FileSys::GetBaseTitleID(program_id);
+    LOG_INFO(Frontend, "Ensuring {} deferred update/DLC file(s) for title {:016X}",
+             pending.size(), base_id);
+
+    for (const auto& candidate_path : pending) {
+        const auto candidate_file =
+            QtCommon::vfs->OpenFile(candidate_path, FileSys::OpenMode::Read);
+        if (!candidate_file) {
+            registry.MarkRegistered(candidate_path);
+            continue;
         }
+        const auto ext = Common::ToLower(
+            std::string(Common::FS::GetExtensionFromFilename(candidate_path)));
+        if (ext == "nca") {
+            const FileSys::NCA nca{candidate_file};
+            if (nca.GetStatus() == Loader::ResultStatus::Success) {
+                QtCommon::provider->AddEntry(
+                    FileSys::TitleType::Application,
+                    FileSys::GetCRTypeFromNCAType(nca.GetType()), nca.GetTitleId(),
+                    candidate_file);
+            }
+        } else {
+            void(QtCommon::provider->AddEntriesFromContainer(candidate_file));
+        }
+        registry.MarkRegistered(candidate_path);
     }
 }
 

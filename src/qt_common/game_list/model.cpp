@@ -95,6 +95,120 @@ void GameListModel::AddEntry(const QList<QStandardItem*>& entry_items, GameListD
     }
 }
 
+void GameListModel::AddDeferredEntry(const QList<QStandardItem*>& entry_items,
+                                     const QString& dir_path, bool is_auto_detected) {
+    if (m_flat) {
+        invisibleRootItem()->appendRow(entry_items);
+        emit ShowList(true);
+        return;
+    }
+
+    QStandardItem* target_dir = nullptr;
+    auto* root = invisibleRootItem();
+    for (int i = 0; i < root->rowCount(); ++i) {
+        auto* row_item = root->child(i);
+        if (!row_item) {
+            continue;
+        }
+        const auto type = static_cast<GameListItemType>(row_item->type());
+        if (is_auto_detected && type == GameListItemType::AutoDetectedDir) {
+            if (row_item->data(GameListDir::AutoDirPathRole).toString() == dir_path) {
+                target_dir = row_item;
+                break;
+            }
+        } else if (!is_auto_detected && type == GameListItemType::CustomDir) {
+            if (row_item->data(Qt::DisplayRole).toString() == dir_path) {
+                target_dir = row_item;
+                break;
+            }
+        }
+    }
+
+    if (!target_dir) {
+        int insert_pos = root->rowCount();
+        if (insert_pos > 0) {
+            const auto last_type =
+                static_cast<GameListItemType>(root->child(insert_pos - 1)->type());
+            if (last_type == GameListItemType::AddDir) {
+                --insert_pos;
+            }
+        }
+        auto* new_dir = new GameListDir(dir_path.toStdString());
+        root->insertRow(insert_pos, new_dir);
+        target_dir = new_dir;
+    }
+
+    target_dir->appendRow(entry_items);
+    emit ShowList(true);
+}
+
+void GameListModel::UpdateTitleAddOns(u64 program_id, const QString& patch_versions) {
+    if (program_id == 0) {
+        return;
+    }
+    const auto update_children = [&](QStandardItem* parent) {
+        for (int row = 0; row < parent->rowCount(); ++row) {
+            auto* item = parent->child(row, COLUMN_NAME);
+            if (!item || static_cast<GameListItemType>(item->type()) != GameListItemType::Game) {
+                continue;
+            }
+            if (item->data(GameListItemPath::ProgramIdRole).toULongLong() != program_id) {
+                continue;
+            }
+            if (auto* addons_item = parent->child(row, COLUMN_ADD_ONS)) {
+                addons_item->setText(patch_versions);
+                addons_item->setData(patch_versions, GameListItem::SortRole);
+            }
+        }
+    };
+
+    auto* root = invisibleRootItem();
+    if (m_flat) {
+        update_children(root);
+    } else {
+        for (int i = 0; i < root->rowCount(); ++i) {
+            if (auto* folder = root->child(i)) {
+                update_children(folder);
+            }
+        }
+    }
+}
+
+void GameListModel::UpdateTitleIcon(u64 program_id, const std::vector<u8>& picture_data) {
+    if (program_id == 0 || picture_data.empty()) {
+        return;
+    }
+    const u32 size = UISettings::values.game_icon_size.GetValue();
+    const QPixmap pixmap = GameListItemPath::MakeDisplayPixmap(picture_data, size);
+    const QByteArray raw_bytes(reinterpret_cast<const char*>(picture_data.data()),
+                               static_cast<qsizetype>(picture_data.size()));
+
+    const auto update_children = [&](QStandardItem* parent) {
+        for (int row = 0; row < parent->rowCount(); ++row) {
+            auto* item = parent->child(row, COLUMN_NAME);
+            if (!item || static_cast<GameListItemType>(item->type()) != GameListItemType::Game) {
+                continue;
+            }
+            if (item->data(GameListItemPath::ProgramIdRole).toULongLong() != program_id) {
+                continue;
+            }
+            item->setData(raw_bytes, GameListItemPath::IconDataRole);
+            item->setData(pixmap, Qt::DecorationRole);
+        }
+    };
+
+    auto* root = invisibleRootItem();
+    if (m_flat) {
+        update_children(root);
+    } else {
+        for (int i = 0; i < root->rowCount(); ++i) {
+            if (auto* folder = root->child(i)) {
+                update_children(folder);
+            }
+        }
+    }
+}
+
 void GameListModel::DonePopulating(const QStringList& watch_list) {
     emit ShowList(!IsEmpty());
 
@@ -117,7 +231,7 @@ bool GameListModel::IsEmpty() const {
 
         if (!child->hasChildren() &&
             (type == GameListItemType::SdmcDir || type == GameListItemType::UserNandDir ||
-             type == GameListItemType::SysNandDir)) {
+             type == GameListItemType::SysNandDir || type == GameListItemType::AutoDetectedDir)) {
             invisibleRootItem()->removeRow(child->row());
             i--;
         }
@@ -199,14 +313,16 @@ void GameListModel::Repopulate() {
 
 void GameListModel::RefreshGameDirectory() {
     ResetExternalWatcher();
-    if (!UISettings::values.game_dirs.empty() && current_worker != nullptr) {
+    if ((!UISettings::values.game_dirs.empty() || UISettings::values.auto_detect_games.GetValue()) &&
+        current_worker != nullptr) {
         LOG_INFO(Frontend, "Change detected in the games directory. Reloading game list.");
         Repopulate();
     }
 }
 
 void GameListModel::RefreshExternalContent() {
-    if (!UISettings::values.game_dirs.empty() && current_worker != nullptr) {
+    if ((!UISettings::values.game_dirs.empty() || UISettings::values.auto_detect_games.GetValue()) &&
+        current_worker != nullptr) {
         LOG_INFO(Frontend, "External content directory changed. Clearing metadata cache.");
         QtCommon::Game::ResetMetadata(false);
         Repopulate();
@@ -226,6 +342,7 @@ void GameListModel::ResetExternalWatcher() {
 
 void GameListModel::RetranslateUI() {
     setHeaderData(COLUMN_NAME, Qt::Horizontal, tr("Name"));
+    setHeaderData(COLUMN_SYSTEM, Qt::Horizontal, tr("System"));
     setHeaderData(COLUMN_ADD_ONS, Qt::Horizontal, tr("Add-ons"));
     setHeaderData(COLUMN_FILE_TYPE, Qt::Horizontal, tr("File type"));
     setHeaderData(COLUMN_SIZE, Qt::Horizontal, tr("Size"));

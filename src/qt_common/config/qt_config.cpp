@@ -240,6 +240,17 @@ void QtConfig::ReadPathValues() {
     }
     EndArray();
 
+    UISettings::values.excluded_auto_game_dirs.clear();
+    const int excluded_auto_size = BeginArray(std::string("excluded_auto_game_dirs"));
+    for (int i = 0; i < excluded_auto_size; ++i) {
+        SetArrayIndex(i);
+        std::string dir_path = ReadStringSetting(std::string("path"));
+        if (!dir_path.empty()) {
+            UISettings::values.excluded_auto_game_dirs.push_back(std::move(dir_path));
+        }
+    }
+    EndArray();
+
     ReadCategory(Settings::Category::Paths);
 
     EndGroup();
@@ -459,6 +470,13 @@ void QtConfig::SavePathValues() {
     for (int i = 0; i < static_cast<int>(Settings::values.external_content_dirs.size()); ++i) {
         SetArrayIndex(i);
         WriteStringSetting(std::string("path"), Settings::values.external_content_dirs[i]);
+    }
+    EndArray();
+
+    BeginArray(std::string("excluded_auto_game_dirs"));
+    for (int i = 0; i < static_cast<int>(UISettings::values.excluded_auto_game_dirs.size()); ++i) {
+        SetArrayIndex(i);
+        WriteStringSetting(std::string("path"), UISettings::values.excluded_auto_game_dirs[i]);
     }
     EndArray();
 

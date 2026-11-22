@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// SPDX-FileCopyrightText: Copyright 2018 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
@@ -9,6 +10,7 @@
 #include <deque>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -74,16 +76,7 @@ private:
     template <typename F>
     void RecordEvent(F&& func);
 
-private:
     void AddTitlesToGameList(GameListDir* parent_dir, GameListItemType parent_type);
-
-    enum class ScanTarget {
-        FillManualContentProvider,
-        PopulateGameList,
-    };
-
-    void ScanFileSystem(ScanTarget target, const std::vector<std::filesystem::path>& files,
-                        GameListDir* parent_dir);
 
     std::shared_ptr<FileSys::VfsFilesystem> vfs;
     FileSys::ManualContentProvider* provider;
@@ -93,7 +86,6 @@ private:
     QStringList watch_list;
 
     std::mutex lock;
-    std::condition_variable cv;
     std::deque<std::function<void(GameListModel*)>> queued_events;
     std::atomic_bool stop_requested = false;
     Common::Event processing_completed;

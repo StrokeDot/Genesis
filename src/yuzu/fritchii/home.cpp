@@ -8,6 +8,7 @@
 
 #include <QApplication>
 #include <QBoxLayout>
+#include <QComboBox>
 #include <QDir>
 #include <QEvent>
 #include <QFileInfo>
@@ -18,32 +19,36 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QSignalBlocker>
 #include <QStandardItemModel>
 #include <QTimer>
 #include <QToolButton>
 
+#include "qt_common/config/uisettings.h"
 #include "qt_common/game_list/game_list_p.h"
+#include "qt_common/game_list/scan_index.h"
 #include "yuzu/fritchii/fritchii_ui.h"
 #include "yuzu/fritchii/saves_window.h"
 
 namespace FritchiiUi {
 namespace {
 
-constexpr u64 OcarinaOfTime = 0x0400486024DEC000ULL;
 constexpr int CoverSize = 200;
 constexpr int TileIcon = 72;
-constexpr int MaxTiles = 7;
 
 struct Game {
     QString title;
     QString path;
     u64 program_id = 0;
+    GameListIndex::ConsoleGeneration generation = GameListIndex::ConsoleGeneration::Switch1;
     QPixmap icon;
 };
 
 QPixmap Rounded(const QPixmap& source, int size, int radius) {
     const qreal ratio = qApp->devicePixelRatio();
-    QPixmap out(QSize(size, size) * ratio);
+    const int pixel_size = static_cast<int>(size * ratio);
+    QPixmap out(pixel_size, pixel_size);
     out.setDevicePixelRatio(ratio);
     out.fill(Qt::transparent);
     {
@@ -55,6 +60,17 @@ QPixmap Rounded(const QPixmap& source, int size, int radius) {
         painter.setClipPath(clip);
         if (source.isNull()) {
             painter.fillRect(QRect(0, 0, size, size), QColor(0x24, 0x23, 0x2c));
+        } else if (source.width() != source.height()) {
+            // Preserve aspect ratio for portrait/landscape covers (e.g. GameVault covers).
+            const QPixmap scaled = source.scaled(pixel_size, pixel_size,
+                                                 Qt::KeepAspectRatioByExpanding,
+                                                 Qt::SmoothTransformation);
+            const int x = (scaled.width() - pixel_size) / 2;
+            const int y = scaled.height() > scaled.width() ? (scaled.height() - pixel_size) / 3
+                                                           : (scaled.height() - pixel_size) / 2;
+            QPixmap cropped = scaled.copy(x, y, pixel_size, pixel_size);
+            cropped.setDevicePixelRatio(ratio);
+            painter.drawPixmap(0, 0, cropped);
         } else {
             painter.drawPixmap(QRect(0, 0, size, size), source);
         }
@@ -100,7 +116,8 @@ QPixmap LocalCover(const QString& game_path) {
     return {};
 }
 
-std::vector<Game> CollectGames(QStandardItemModel* model, const QPixmap& fallback) {
+std::vector<Game> CollectGames(QStandardItemModel* model, const QPixmap& fallback,
+                               GameListIndex::SystemFilter filter) {
     std::vector<Game> games;
     std::set<QString> seen;
     if (!model) {
@@ -118,6 +135,10 @@ std::vector<Game> CollectGames(QStandardItemModel* model, const QPixmap& fallbac
         Game game;
         game.path = path;
         game.program_id = item->data(GameListItemPath::ProgramIdRole).toULongLong();
+        game.generation = GameListIndex::ClassifyConsoleGeneration(game.program_id);
+        if (!GameListIndex::MatchesSystemFilter(game.generation, filter)) {
+            return;
+        }
         game.title = item->data(GameListItemPath::TitleRole).toString();
         if (game.title.isEmpty()) {
             game.title = QFileInfo(path).completeBaseName();
@@ -130,7 +151,7 @@ std::vector<Game> CollectGames(QStandardItemModel* model, const QPixmap& fallbac
             game.icon = LocalCover(path);
         }
         if (IsBlank(game.icon)) {
-            // No icon in the dump and none next to it: Fritchii's own icon, not an empty square.
+            // No icon in the dump and none next to it: Genesis's own icon, not an empty square.
             game.icon = fallback;
         }
         games.push_back(std::move(game));
@@ -265,21 +286,44 @@ QWidget* Home::MakePage() {
     layout->setContentsMargins(56, 24, 56, 36);
     layout->setSpacing(0);
 
-    // Discord and Donate in plain sight at the top right, with their names (2026-11-10: the
-    // rail's bare icons were easy to miss).
     auto* links = new QHBoxLayout;
     links->setSpacing(10);
     links->addStretch(1);
-    const auto link = [this](const QString& icon, const QString& text, void (*open)()) {
-        auto* button = new QPushButton(Icon(icon, 18), text, page);
-        button->setObjectName(QStringLiteral("FritchiiLink"));
-        button->setIconSize(QSize(18, 18));
-        button->setCursor(Qt::PointingHandCursor);
-        button->setFocusPolicy(Qt::NoFocus);
-        connect(button, &QPushButton::clicked, this, [open] { open(); });
-        return button;
-    };
-    // v5.8.3: the Saves window (export, import, copy between Fritchii, Eden and Lichii).
+
+    system_filter_combo = new QComboBox(page);
+    system_filter_combo->setFocusPolicy(Qt::NoFocus);
+    system_filter_combo->addItem(tr("All Systems"),
+                                 static_cast<int>(GameListIndex::SystemFilter::All));
+    system_filter_combo->addItem(tr("Switch 1"),
+                                 static_cast<int>(GameListIndex::SystemFilter::Switch1));
+    system_filter_combo->addItem(tr("Switch 2"),
+                                 static_cast<int>(GameListIndex::SystemFilter::Switch2));
+    const int saved_filter =
+        std::clamp<int>(static_cast<int>(UISettings::values.system_filter.GetValue()), 0, 2);
+    system_filter_combo->setCurrentIndex(saved_filter);
+    connect(system_filter_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this](int idx) {
+                UISettings::values.system_filter = static_cast<u8>(std::clamp(idx, 0, 2));
+                Refresh();
+            });
+    links->addWidget(system_filter_combo);
+
+    auto* all_games_btn = new QPushButton(Icon(QStringLiteral("list"), 18), tr("All games"), page);
+    all_games_btn->setObjectName(QStringLiteral("FritchiiLink"));
+    all_games_btn->setIconSize(QSize(18, 18));
+    all_games_btn->setCursor(Qt::PointingHandCursor);
+    all_games_btn->setFocusPolicy(Qt::NoFocus);
+    connect(all_games_btn, &QPushButton::clicked, this, &Home::ShowList);
+    links->addWidget(all_games_btn);
+
+    auto* add_folder_btn = new QPushButton(Icon(QStringLiteral("plus"), 18), tr("Add folder"), page);
+    add_folder_btn->setObjectName(QStringLiteral("FritchiiLink"));
+    add_folder_btn->setIconSize(QSize(18, 18));
+    add_folder_btn->setCursor(Qt::PointingHandCursor);
+    add_folder_btn->setFocusPolicy(Qt::NoFocus);
+    connect(add_folder_btn, &QPushButton::clicked, this, [this] { hooks.add_folder(); });
+    links->addWidget(add_folder_btn);
+
     auto* saves = new QPushButton(Icon(QStringLiteral("list"), 18), tr("Saves"), page);
     saves->setObjectName(QStringLiteral("FritchiiLink"));
     saves->setIconSize(QSize(18, 18));
@@ -289,18 +333,8 @@ QWidget* Home::MakePage() {
         ShowSavesWindow(window, hooks.emulation_running);
     });
     links->addWidget(saves);
-    links->addWidget(link(QStringLiteral("community"), tr("Discord"), &OpenDiscord));
-    // Buy Me a Coffee (owner, 2026-11-12): the support link in its own yellow, so it is seen.
-    auto* coffee = new QPushButton(IconTinted(QStringLiteral("coffee"), QColor(0x1b, 0x1b, 0x1f), 18),
-                                   tr("Buy me a coffee"), page);
-    coffee->setObjectName(QStringLiteral("FritchiiCoffee"));
-    coffee->setIconSize(QSize(18, 18));
-    coffee->setCursor(Qt::PointingHandCursor);
-    coffee->setFocusPolicy(Qt::NoFocus);
-    connect(coffee, &QPushButton::clicked, this, [] { OpenDonate(); });
-    links->addWidget(coffee);
     layout->addLayout(links);
-    layout->addSpacing(28);
+    layout->addSpacing(20);
 
     auto* hero = new QHBoxLayout;
     hero->setSpacing(36);
@@ -311,12 +345,17 @@ QWidget* Home::MakePage() {
     auto* side = new QVBoxLayout;
     side->setSpacing(0);
     side->addStretch(1);
+    system_badge = new QLabel;
+    system_badge->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+    system_badge->hide();
+    side->addWidget(system_badge, 0, Qt::AlignLeft);
+    side->addSpacing(10);
     title = new QLabel;
     title->setObjectName(QStringLiteral("FritchiiHeroTitle"));
     title->setWordWrap(true);
     title->setMaximumWidth(680);
     side->addWidget(title);
-    side->addSpacing(24);
+    side->addSpacing(20);
     play = new QPushButton;
     play->setObjectName(QStringLiteral("FritchiiPlay"));
     play->setCursor(Qt::PointingHandCursor);
@@ -333,21 +372,41 @@ QWidget* Home::MakePage() {
     hero->addLayout(side, 1);
     layout->addLayout(hero);
 
-    layout->addSpacing(48);
-    row_box = new QWidget;
-    row = new QHBoxLayout(row_box);
-    row->setContentsMargins(0, 0, 0, 0);
-    row->setSpacing(8);
-    row->setAlignment(Qt::AlignLeft);
-    layout->addWidget(row_box);
-    layout->addStretch(1);
+    layout->addSpacing(28);
+    auto* scroll = new QScrollArea(page);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidgetResizable(true);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setStyleSheet(QStringLiteral("QScrollArea { background: transparent; border: none; }"));
+    sections_box = new QWidget;
+    sections_box->setStyleSheet(QStringLiteral("background: transparent;"));
+    sections_layout = new QVBoxLayout(sections_box);
+    sections_layout->setContentsMargins(0, 0, 0, 0);
+    sections_layout->setSpacing(20);
+    sections_layout->setAlignment(Qt::AlignTop);
+    scroll->setWidget(sections_box);
+    layout->addWidget(scroll, 1);
     return page;
 }
 
 void Home::Refresh() {
-    const std::vector<Game> games = CollectGames(hooks.model, window->windowIcon().pixmap(256));
+    const auto filter = static_cast<GameListIndex::SystemFilter>(
+        std::clamp<int>(static_cast<int>(UISettings::values.system_filter.GetValue()), 0, 2));
+    if (system_filter_combo && system_filter_combo->currentIndex() != static_cast<int>(filter)) {
+        const QSignalBlocker blocker(system_filter_combo);
+        system_filter_combo->setCurrentIndex(static_cast<int>(filter));
+    }
 
-    // The hero: the game picked last, else Ocarina of Time, else the first game.
+    std::vector<Game> games =
+        CollectGames(hooks.model, window->windowIcon().pixmap(256), filter);
+    std::sort(games.begin(), games.end(), [](const Game& a, const Game& b) {
+        if (a.generation != b.generation) {
+            return static_cast<int>(a.generation) < static_cast<int>(b.generation);
+        }
+        return a.title.compare(b.title, Qt::CaseInsensitive) < 0;
+    });
+
+    // The hero: the game picked last, else the first Switch 1 game, else the first game.
     const Game* hero = nullptr;
     for (const Game& game : games) {
         if (!hero_path.isEmpty() && game.path == hero_path) {
@@ -357,7 +416,7 @@ void Home::Refresh() {
     }
     if (!hero) {
         for (const Game& game : games) {
-            if (game.program_id == OcarinaOfTime) {
+            if (game.generation == GameListIndex::ConsoleGeneration::Switch1) {
                 hero = &game;
                 break;
             }
@@ -372,6 +431,16 @@ void Home::Refresh() {
         hero_id = hero->program_id;
         cover->setPixmap(Rounded(hero->icon, CoverSize, 18));
         cover->show();
+        const bool is_sw2 = hero->generation == GameListIndex::ConsoleGeneration::Switch2;
+        system_badge->setText(is_sw2 ? tr("SWITCH 2") : tr("SWITCH 1"));
+        system_badge->setStyleSheet(
+            is_sw2 ? QStringLiteral("QLabel { background-color: #5c2028; color: #fca5a5; "
+                                    "border-radius: 6px; padding: 4px 10px; font-size: 11px; "
+                                    "font-weight: 600; }")
+                   : QStringLiteral("QLabel { background-color: #312e59; color: #c4b5fd; "
+                                    "border-radius: 6px; padding: 4px 10px; font-size: 11px; "
+                                    "font-weight: 600; }"));
+        system_badge->show();
         title->setText(hero->title);
         play->setText(tr("Play"));
         play->setIcon(Glyph(QStringLiteral("play"), 0x1c1433, 18));
@@ -379,59 +448,94 @@ void Home::Refresh() {
         hero_path.clear();
         hero_id = 0;
         cover->hide();
+        system_badge->hide();
         title->setText(tr("Add your games"));
         play->setText(tr("Add Folder"));
         play->setIcon(Glyph(QStringLiteral("plus"), 0x1c1433, 18));
     }
 
-    // The small row: the other games, then "All games" and "Add folder".
+    // Rebuild the separated Switch 1 / Switch 2 rows.
     // deleteLater: a tile's own click can land here.
-    while (QLayoutItem* item = row->takeAt(0)) {
+    while (QLayoutItem* item = sections_layout->takeAt(0)) {
         if (QWidget* widget = item->widget()) {
             widget->hide();
             widget->deleteLater();
         }
         delete item;
     }
-    const auto tile = [this](const QIcon& icon, const QString& text) {
-        auto* button = new QToolButton(row_box);
-        button->setObjectName(QStringLiteral("FritchiiTile"));
-        button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-        button->setIcon(icon);
-        button->setIconSize(QSize(TileIcon, TileIcon));
-        button->setFixedWidth(TileIcon + 40);
-        button->setCursor(Qt::PointingHandCursor);
-        button->setFocusPolicy(Qt::NoFocus);
-        const QFontMetrics metrics(button->font());
-        button->setText(metrics.elidedText(text, Qt::ElideRight, TileIcon + 24));
-        button->setToolTip(text);
-        row->addWidget(button);
-        return button;
-    };
-    int shown = 0;
+
+    std::vector<const Game*> sw1_games;
+    std::vector<const Game*> sw2_games;
     for (const Game& game : games) {
-        if (game.path == hero_path || shown == MaxTiles) {
-            continue;
+        if (game.generation == GameListIndex::ConsoleGeneration::Switch2) {
+            sw2_games.push_back(&game);
+        } else {
+            sw1_games.push_back(&game);
         }
-        ++shown;
-        QToolButton* button = tile(QIcon(Rounded(game.icon, TileIcon, 12)), game.title);
-        connect(button, &QToolButton::clicked, this,
-                [this, path = game.path, id = game.program_id] {
-                    hero_path = path;
-                    hero_id = id;
-                    Refresh();
-                });
     }
-    if (!games.empty()) {
-        QToolButton* all = tile(Icon(QStringLiteral("list"), 40), tr("All games"));
-        all->setIconSize(QSize(40, 40));
-        all->setMinimumHeight(TileIcon + 44);
-        connect(all, &QToolButton::clicked, this, &Home::ShowList);
-    }
-    QToolButton* add = tile(Icon(QStringLiteral("plus"), 40), tr("Add folder"));
-    add->setIconSize(QSize(40, 40));
-    add->setMinimumHeight(TileIcon + 44);
-    connect(add, &QToolButton::clicked, this, [this] { hooks.add_folder(); });
+
+    const auto add_section = [this](const QString& heading, const QString& badge_color,
+                                    const std::vector<const Game*>& group) {
+        if (group.empty()) {
+            return;
+        }
+        auto* section = new QWidget(sections_box);
+        section->setStyleSheet(QStringLiteral("background: transparent;"));
+        auto* v = new QVBoxLayout(section);
+        v->setContentsMargins(0, 0, 0, 0);
+        v->setSpacing(10);
+
+        auto* header = new QLabel(QStringLiteral("%1 (%2)").arg(heading).arg(group.size()), section);
+        header->setStyleSheet(QStringLiteral(
+            "QLabel { color: %1; font-size: 13px; font-weight: 600; letter-spacing: 0.5px; }")
+                                  .arg(badge_color));
+        v->addWidget(header);
+
+        auto* hscroll = new QScrollArea(section);
+        hscroll->setFrameShape(QFrame::NoFrame);
+        hscroll->setWidgetResizable(true);
+        hscroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        hscroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        hscroll->setFixedHeight(TileIcon + 64);
+        hscroll->setStyleSheet(
+            QStringLiteral("QScrollArea { background: transparent; border: none; }"));
+
+        auto* strip = new QWidget;
+        strip->setStyleSheet(QStringLiteral("background: transparent;"));
+        auto* row = new QHBoxLayout(strip);
+        row->setContentsMargins(0, 0, 0, 0);
+        row->setSpacing(8);
+        row->setAlignment(Qt::AlignLeft);
+
+        for (const Game* game : group) {
+            auto* button = new QToolButton(strip);
+            button->setObjectName(QStringLiteral("FritchiiTile"));
+            button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+            button->setIcon(QIcon(Rounded(game->icon, TileIcon, 12)));
+            button->setIconSize(QSize(TileIcon, TileIcon));
+            button->setFixedWidth(TileIcon + 40);
+            button->setCursor(Qt::PointingHandCursor);
+            button->setFocusPolicy(Qt::NoFocus);
+            const QFontMetrics metrics(button->font());
+            button->setText(metrics.elidedText(game->title, Qt::ElideRight, TileIcon + 24));
+            button->setToolTip(game->title);
+            connect(button, &QToolButton::clicked, this,
+                    [this, path = game->path, id = game->program_id] {
+                        hero_path = path;
+                        hero_id = id;
+                        Refresh();
+                    });
+            row->addWidget(button);
+        }
+        row->addStretch(1);
+        hscroll->setWidget(strip);
+        v->addWidget(hscroll);
+        sections_layout->addWidget(section);
+    };
+
+    add_section(tr("Nintendo Switch"), QStringLiteral("#c4b5fd"), sw1_games);
+    add_section(tr("Nintendo Switch 2"), QStringLiteral("#fca5a5"), sw2_games);
+    sections_layout->addStretch(1);
 }
 
 void Home::ShowHome() {

@@ -236,6 +236,12 @@ if (NOT ANDROID)
     add_test(NAME profile_import_tests COMMAND profile_import_tests)
 endif()
 
+add_executable(game_list_discovery_tests
+    common/game_list_discovery.cpp)
+target_link_libraries(game_list_discovery_tests PRIVATE Catch2::Catch2WithMain)
+target_include_directories(game_list_discovery_tests PRIVATE ..)
+add_test(NAME game_list_discovery_tests COMMAND game_list_discovery_tests)
+
 # needed for vma
 if (NOT MSVC)
     target_compile_options(tests PRIVATE

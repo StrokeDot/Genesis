@@ -573,6 +573,9 @@ MainWindow::MainWindow(bool has_broken_vulkan)
     // Setup content providers.
     QtCommon::SetupContentProviders();
 
+    // Auto-detect Switch decryption keys and firmware if not yet installed.
+    QtCommon::Content::AutoDetectKeysAndFirmware();
+
     // Gen keys if necessary
     OnCheckFirmwareDecryption(false);
 
@@ -687,33 +690,8 @@ MainWindow::MainWindow(bool has_broken_vulkan)
         }
     }
 
-    // Once per major version, before a game boots: clear the old shader caches? (Not when started
-    // with a game: the next plain launch asks.)
-    if (!launched_with_game && FritchiiCacheCleanup::OfferOnce(this)) {
-        OnSaveConfig();
-    }
-
-    // Then, once per major version: Max Resolution on or off, with this PC's card in the question.
-    if (!launched_with_game && FritchiiMaxResolution::OfferOnce(this, vk_device_records)) {
-        OnSaveConfig();
-    }
-
-    // Then, once per major version: the common things players will still run into.
-    if (!launched_with_game && FritchiiKnownIssues::ShowOnce(this, vk_device_records)) {
-        OnSaveConfig();
-    }
-
-    // Then the faster occlusion mode for AMD, once, when the last game could use it and the app
-    // was closed before it was offered (it is offered after a game otherwise).
-    if (!launched_with_game && FritchiiOcclusionOffer::OfferOnce(this, false)) {
-        OnSaveConfig();
-    }
-
-    // The first launch asks for Ocarina of Time's frame rate (not when started with a game,
-    // e.g. from a shortcut or script: that keeps the 60 FPS default until the next plain launch).
-    if (!launched_with_game && !Settings::values.oot_fps_asked.GetValue()) {
-        QTimer::singleShot(0, this, &MainWindow::AskOotFrameRate);
-    }
+    // Genesis opens directly into the Home screen without Fritchii OoT startup modals.
+    Settings::values.oot_fps_asked.SetValue(true);
 }
 
 namespace {
@@ -2573,17 +2551,19 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
     const auto loader =
         Loader::GetLoader(*QtCommon::system, v_file, params.program_id, params.program_index);
 
-    if (loader != nullptr && loader->ReadProgramId(title_id) == Loader::ResultStatus::Success &&
-        type == StartGameType::Normal) {
-        // Load per game settings
-        const auto file_path =
-            std::filesystem::path{Common::U16StringFromBuffer(filename.utf16(), filename.size())};
-        const auto config_file_name = title_id == 0
-                                          ? Common::FS::PathToUTF8String(file_path.filename())
-                                          : fmt::format("{:016X}", title_id);
-        QtConfig per_game_config(config_file_name, Config::ConfigType::PerGameConfig);
-        QtCommon::system->HIDCore().ReloadInputDevices();
-        QtCommon::system->ApplySettings();
+    if (loader != nullptr && loader->ReadProgramId(title_id) == Loader::ResultStatus::Success) {
+        QtCommon::Content::EnsureTitleContentRegistered(title_id);
+        if (type == StartGameType::Normal) {
+            // Load per game settings
+            const auto file_path = std::filesystem::path{
+                Common::U16StringFromBuffer(filename.utf16(), filename.size())};
+            const auto config_file_name = title_id == 0
+                                              ? Common::FS::PathToUTF8String(file_path.filename())
+                                              : fmt::format("{:016X}", title_id);
+            QtConfig per_game_config(config_file_name, Config::ConfigType::PerGameConfig);
+            QtCommon::system->HIDCore().ReloadInputDevices();
+            QtCommon::system->ApplySettings();
+        }
     }
 
     // OoT's render height patch is decided while the game loads, before the renderer exists: a DLSS

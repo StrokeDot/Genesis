@@ -23,6 +23,7 @@
 #include "common/string_util.h"
 #include "frontend_common/play_time_manager.h"
 #include "qt_common/config/uisettings.h"
+#include "qt_common/game_list/scan_index.h"
 #include "qt_common/qt_common.h"
 
 enum class GameListItemType {
@@ -33,6 +34,7 @@ enum class GameListItemType {
     SysNandDir = QStandardItem::UserType + 5,
     AddDir = QStandardItem::UserType + 6,
     Favorites = QStandardItem::UserType + 7,
+    AutoDetectedDir = QStandardItem::UserType + 8,
 };
 
 Q_DECLARE_METATYPE(GameListItemType);
@@ -80,13 +82,38 @@ public:
     static constexpr int FullPathRole = SortRole + 2;
     static constexpr int ProgramIdRole = SortRole + 3;
     static constexpr int FileTypeRole = SortRole + 4;
-    /// The game's icon file as read, before scaling (the Fritchii home cover).
+    /// The game's icon file as read, before scaling (the Genesis home cover).
     static constexpr int IconDataRole = SortRole + 5;
+    static constexpr int ConsoleGenerationRole = SortRole + 6;
+
+    static QPixmap MakeDisplayPixmap(const std::vector<u8>& picture_data, u32 size) {
+        QPixmap picture;
+        if (!picture_data.empty() &&
+            picture.loadFromData(picture_data.data(), static_cast<u32>(picture_data.size()))) {
+            if (size == 0) {
+                return picture;
+            }
+            if (picture.width() != picture.height()) {
+                QPixmap scaled = picture.scaled(static_cast<int>(size), static_cast<int>(size),
+                                                Qt::KeepAspectRatioByExpanding,
+                                                Qt::SmoothTransformation);
+                const int x = (scaled.width() - static_cast<int>(size)) / 2;
+                const int y = scaled.height() > scaled.width()
+                                  ? (scaled.height() - static_cast<int>(size)) / 3
+                                  : (scaled.height() - static_cast<int>(size)) / 2;
+                return scaled.copy(x, y, static_cast<int>(size), static_cast<int>(size));
+            }
+            return picture.scaled(static_cast<int>(size), static_cast<int>(size),
+                                  Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        }
+        return GetDefaultIcon(size);
+    }
 
     GameListItemPath() = default;
     GameListItemPath(const QString& game_path, const std::vector<u8>& picture_data,
                      const QString& game_name, const QString& game_type, u64 program_id,
                      u64 play_time, const QString& patch_versions) {
+        const auto console_gen = GameListIndex::ClassifyConsoleGeneration(program_id);
         setData(type(), TypeRole);
         setData(game_path, FullPathRole);
         setData(game_name, TitleRole);
@@ -95,6 +122,7 @@ public:
         setData(QByteArray(reinterpret_cast<const char*>(picture_data.data()),
                            static_cast<qsizetype>(picture_data.size())),
                 IconDataRole);
+        setData(static_cast<int>(console_gen), ConsoleGenerationRole);
 
         const auto readable_play_time =
             play_time > 0 ? QObject::tr("Play Time: %1")
@@ -113,19 +141,17 @@ public:
             return QObject::tr("Version: 1.0.0");
         }();
 
-        const auto tooltip = QStringLiteral("%1\n%2").arg(readable_play_time, enabled_update);
+        const auto system_line = QObject::tr("System: %1")
+                                     .arg(QString::fromLatin1(
+                                         GameListIndex::ConsoleGenerationLabel(console_gen)));
+
+        const auto tooltip =
+            QStringLiteral("%1\n%2\n%3").arg(system_line, readable_play_time, enabled_update);
 
         setData(tooltip, Qt::ToolTipRole);
 
         const u32 size = UISettings::values.game_icon_size.GetValue();
-
-        QPixmap picture;
-        if (!picture.loadFromData(picture_data.data(), static_cast<u32>(picture_data.size()))) {
-            picture = GetDefaultIcon(size);
-        }
-        picture = picture.scaled(size, size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-
-        setData(picture, Qt::DecorationRole);
+        setData(MakeDisplayPixmap(picture_data, size), Qt::DecorationRole);
     }
 
     int type() const override {
@@ -301,6 +327,7 @@ public:
 class GameListDir : public GameListItem {
 public:
     static constexpr int GameDirRole = Qt::UserRole + 2;
+    static constexpr int AutoDirPathRole = Qt::UserRole + 3;
 
     explicit GameListDir(UISettings::GameDir& directory,
                          GameListItemType dir_type_ = GameListItemType::CustomDir)
@@ -337,6 +364,16 @@ public:
 
         if (icon_name != nullptr)
             setData(ThemeIcon(icon_name), Qt::DecorationRole);
+    }
+
+    explicit GameListDir(const std::string& auto_dir_path)
+        : dir_type{GameListItemType::AutoDetectedDir} {
+        setData(type(), TypeRole);
+        setData(QVariant(-1), GameDirRole);
+        const QString path = QString::fromStdString(auto_dir_path);
+        setData(path, AutoDirPathRole);
+        setData(QObject::tr("Auto-detected: %1").arg(path), Qt::DisplayRole);
+        setData(ThemeIcon(QFileInfo::exists(path) ? "folder" : "bad_folder"), Qt::DecorationRole);
     }
 
     int type() const override {

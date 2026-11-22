@@ -39,8 +39,9 @@ void GameTree::OnItemExpanded(const QModelIndex& item) {
     const bool is_dir = type == GameListItemType::CustomDir || type == GameListItemType::SdmcDir ||
                         type == GameListItemType::UserNandDir ||
                         type == GameListItemType::SysNandDir;
+    const bool is_auto = type == GameListItemType::AutoDetectedDir;
     const bool is_fave = type == GameListItemType::Favorites;
-    if (!is_dir && !is_fave) {
+    if (!is_dir && !is_auto && !is_fave) {
         return;
     }
     const bool is_expanded = isExpanded(item);
@@ -48,8 +49,14 @@ void GameTree::OnItemExpanded(const QModelIndex& item) {
         UISettings::values.favorites_expanded = is_expanded;
         return;
     }
+    if (is_auto) {
+        UISettings::values.auto_detected_expanded = is_expanded;
+        return;
+    }
     const int item_dir_index = item.data(GameListDir::GameDirRole).toInt();
-    UISettings::values.game_dirs[item_dir_index].expanded = is_expanded;
+    if (item_dir_index >= 0 && item_dir_index < UISettings::values.game_dirs.size()) {
+        UISettings::values.game_dirs[item_dir_index].expanded = is_expanded;
+    }
 }
 
 void GameTree::SaveInterfaceLayout() {
@@ -62,11 +69,13 @@ void GameTree::LoadInterfaceLayout() {
     if (hdr->restoreState(UISettings::values.gamelist_header_state))
         return;
 
-    hdr->resizeSection(GameListModel::COLUMN_NAME, 840);
+    hdr->resizeSection(GameListModel::COLUMN_NAME, 760);
+    hdr->resizeSection(GameListModel::COLUMN_SYSTEM, 90);
 }
 
 void GameTree::UpdateColumnVisibility(GameListModel* model) {
     Q_UNUSED(model)
+    setColumnHidden(GameListModel::COLUMN_SYSTEM, !UISettings::values.show_system);
     setColumnHidden(GameListModel::COLUMN_ADD_ONS, !UISettings::values.show_add_ons);
     setColumnHidden(GameListModel::COLUMN_FILE_TYPE, !UISettings::values.show_types);
     setColumnHidden(GameListModel::COLUMN_SIZE, !UISettings::values.show_size);
@@ -117,11 +126,12 @@ int GameTree::FilterClosedResultCount(GameListModel* model) {
     return children_total;
 }
 
-void GameTree::ApplyFilter(const QString& edit_filter_text, GameListModel* model) {
+void GameTree::ApplyFilter(const QString& edit_filter_text, GameListModel* model,
+                           GameListIndex::SystemFilter system_filter) {
     int children_total = 0;
     int result_count = 0;
 
-    if (edit_filter_text.isEmpty()) {
+    if (edit_filter_text.isEmpty() && system_filter == GameListIndex::SystemFilter::All) {
         children_total = FilterClosedResultCount(model);
         emit FilterResultReady(children_total, children_total);
         return;
@@ -139,7 +149,7 @@ void GameTree::ApplyFilter(const QString& edit_filter_text, GameListModel* model
 
             const QStandardItem* child = folder->child(j, 0);
 
-            if (Yuzu::FilterMatches(edit_filter_text, child)) {
+            if (Yuzu::FilterMatches(edit_filter_text, child, system_filter)) {
                 setRowHidden(j, folder_index, false);
                 ++result_count;
             } else {

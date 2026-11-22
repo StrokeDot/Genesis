@@ -56,31 +56,19 @@ endif()
 
 # Generate cpp with Git revision from template
 
-set(BUILD_AUTO_UPDATE_STABLE_REPO "zortos293/Lichii")
+set(BUILD_AUTO_UPDATE_STABLE_REPO "StrokeDot/Genesis")
 set(BUILD_AUTO_UPDATE_STABLE_API "api.github.com")
-set(BUILD_AUTO_UPDATE_API_PATH "/repos/zortos293/Lichii/releases?per_page=100")
+set(BUILD_AUTO_UPDATE_API_PATH "/repos/StrokeDot/Genesis/releases?per_page=100")
 set(BUILD_AUTO_UPDATE_WEBSITE "https://github.com")
-set(BUILD_AUTO_UPDATE_REPO "zortos293/Lichii")
+set(BUILD_AUTO_UPDATE_REPO "StrokeDot/Genesis")
 if (NIGHTLY_BUILD)
-    set(REPO_NAME "Lichii Nightly")
-elseif (FRIZTI_VERSION AND NOT LICHII_BUILD_TAG MATCHES "^build-[0-9]+$")
-    set(REPO_NAME "Fritchii")
+    set(REPO_NAME "Genesis Nightly")
 else()
-    set(REPO_NAME "Lichii")
+    set(REPO_NAME "Genesis")
 endif()
 
-# What players see (title bar, About, update messages): dist/frizti_version_label.txt when it
-# exists (v6: "v6.0 Beta", the .0 for 60 fps), else the version. The number in
-# dist/frizti_version.txt stays what updaters parse (N.0 is spelled N there).
+set(BUILD_VERSION "v0.1.0")
 set(BUILD_LABEL "${BUILD_VERSION}")
-set(FRIZTI_LABEL_FILE "${CMAKE_SOURCE_DIR}/dist/frizti_version_label.txt")
-if (FRIZTI_VERSION AND NOT LICHII_BUILD_TAG MATCHES "^build-[0-9]+$" AND EXISTS "${FRIZTI_LABEL_FILE}")
-    file(STRINGS "${FRIZTI_LABEL_FILE}" FRIZTI_LABEL LIMIT_COUNT 1)
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${FRIZTI_LABEL_FILE}")
-    if (FRIZTI_LABEL)
-        set(BUILD_LABEL "${FRIZTI_LABEL}")
-    endif()
-endif()
 
 set(BUILD_ID ${GIT_REFSPEC})
 set(BUILD_FULLNAME "${REPO_NAME} ${BUILD_VERSION} ")

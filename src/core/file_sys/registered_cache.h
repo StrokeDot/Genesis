@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// SPDX-FileCopyrightText: Copyright 2018 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
@@ -8,7 +9,9 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <vector>
 #include "common/container/unordered_map.h"
@@ -177,7 +180,7 @@ public:
                                const VfsCopyFunction& copy = &VfsRawCopy);
 
     // Due to the fact that we must use Meta-type NCAs to determine the existence of files, this
-    // poses quite a challenge. Instead of creating a new meta NCA for this file, the emulator will create a
+    // poses quite a challenge. Instead of creating a new meta NCA for this file, yuzu will create a
     // dir inside the NAND called 'yuzu_meta' and store the raw CNMT there.
     // TODO(DarkLordZach): Author real meta-type NCAs and install those.
     InstallResult InstallEntry(const NCA& nca, TitleType type, bool overwrite_if_exists = false,
@@ -257,6 +260,14 @@ private:
     std::array<ContentProvider*, size_t(ContentProviderUnionSlot::Count)> providers;
 };
 
+struct ContainerScanSummary {
+    bool valid{false};
+    bool is_bootable{false};
+    bool has_updates_or_dlc{false};
+    std::vector<u64> application_program_ids;
+    std::vector<u64> referenced_base_ids;
+};
+
 class ManualContentProvider : public ContentProvider {
 public:
     ~ManualContentProvider() override;
@@ -267,6 +278,9 @@ public:
                              u32 version, const std::string& version_string, VirtualFile file);
     bool AddEntriesFromContainer(VirtualFile file, bool only_content = false,
                                  std::optional<u64> base_program_id = std::nullopt);
+    ContainerScanSummary ScanAndRegisterContainer(VirtualFile file, bool register_entries = true,
+                                                  bool only_content = false,
+                                                  std::optional<u64> base_program_id = std::nullopt);
     void ClearAllEntries();
     // Exchanges every entry with other's.
     void SwapEntries(ManualContentProvider& other) noexcept;
@@ -285,6 +299,14 @@ public:
     VirtualFile GetEntryForVersion(u64 title_id, ContentRecordType type, u32 version) const;
 
 private:
+    void AddEntryUnlocked(TitleType title_type, ContentRecordType content_type, u64 title_id,
+                          VirtualFile file);
+    void AddEntryWithVersionUnlocked(TitleType title_type, ContentRecordType content_type,
+                                     u64 title_id, u32 version, const std::string& version_string,
+                                     VirtualFile file);
+    VirtualFile GetEntryRawUnlocked(u64 title_id, ContentRecordType type) const;
+
+    mutable std::shared_mutex mutex;
     std::map<std::tuple<TitleType, ContentRecordType, u64>, VirtualFile> entries;
     std::vector<ExternalUpdateEntry> multi_version_entries;
 };

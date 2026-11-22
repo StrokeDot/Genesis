@@ -4,8 +4,11 @@
 #include "game/game_list.h"
 #include "game/search_field.h"
 
+#include <QComboBox>
 #include <QKeyEvent>
 #include <QToolButton>
+
+#include "qt_common/config/uisettings.h"
 
 // TODO: Remove GameList dependence?
 GameListSearchField::KeyReleaseEater::KeyReleaseEater(GameList* gamelist_, QObject* parent)
@@ -71,6 +74,20 @@ QString GameListSearchField::filterText() const {
     return edit_filter->text();
 }
 
+GameListIndex::SystemFilter GameListSearchField::systemFilter() const {
+    if (!combo_system_filter) {
+        return GameListIndex::SystemFilter::All;
+    }
+    const int val = combo_system_filter->currentData().toInt();
+    if (val == static_cast<int>(GameListIndex::SystemFilter::Switch1)) {
+        return GameListIndex::SystemFilter::Switch1;
+    }
+    if (val == static_cast<int>(GameListIndex::SystemFilter::Switch2)) {
+        return GameListIndex::SystemFilter::Switch2;
+    }
+    return GameListIndex::SystemFilter::All;
+}
+
 void GameListSearchField::clear() {
     edit_filter->clear();
 }
@@ -91,6 +108,17 @@ GameListSearchField::GameListSearchField(GameList* parent) : QWidget{parent} {
     edit_filter->installEventFilter(key_release_eater);
     edit_filter->setClearButtonEnabled(true);
     connect(edit_filter, &QLineEdit::textChanged, parent, &GameList::OnTextChanged);
+
+    combo_system_filter = new QComboBox(this);
+    combo_system_filter->addItem(QString{}, static_cast<int>(GameListIndex::SystemFilter::All));
+    combo_system_filter->addItem(QString{}, static_cast<int>(GameListIndex::SystemFilter::Switch1));
+    combo_system_filter->addItem(QString{}, static_cast<int>(GameListIndex::SystemFilter::Switch2));
+    const int saved_filter =
+        combo_system_filter->findData(static_cast<int>(UISettings::values.system_filter.GetValue()));
+    combo_system_filter->setCurrentIndex(saved_filter >= 0 ? saved_filter : 0);
+    connect(combo_system_filter, QOverload<int>::of(&QComboBox::currentIndexChanged), parent,
+            &GameList::OnSystemFilterChanged);
+
     label_filter_result = new QLabel;
     button_filter_close = new QToolButton(this);
     button_filter_close->setText(QStringLiteral("X"));
@@ -104,6 +132,7 @@ GameListSearchField::GameListSearchField(GameList* parent) : QWidget{parent} {
     layout_filter->setSpacing(10);
     layout_filter->addWidget(label_filter);
     layout_filter->addWidget(edit_filter);
+    layout_filter->addWidget(combo_system_filter);
     layout_filter->addWidget(label_filter_result);
     layout_filter->addWidget(button_filter_close);
     setLayout(layout_filter);
@@ -121,4 +150,9 @@ void GameListSearchField::changeEvent(QEvent* event) {
 void GameListSearchField::RetranslateUI() {
     label_filter->setText(tr("Filter:"));
     edit_filter->setPlaceholderText(tr("Enter pattern to filter"));
+    if (combo_system_filter) {
+        combo_system_filter->setItemText(0, tr("All Systems"));
+        combo_system_filter->setItemText(1, tr("Switch 1"));
+        combo_system_filter->setItemText(2, tr("Switch 2"));
+    }
 }

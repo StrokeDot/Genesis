@@ -49,38 +49,15 @@
 UserDataMigrator::UserDataMigrator(QMainWindow* main_window) {
     // NOTE: Logging is not initialized yet, do not produce logs here.
 
-    // Help > Copy Data from Eden or Lichii (v5.8.1) left a request and restarted Fritchii.
+    // Help > Copy Data from Eden or Lichii left a request and restarted Genesis.
     if (const auto request = FrontendCommon::TakeProfileImportRequest(); !request.empty()) {
         if (const auto choice = ProfileImportChoice::Parse(request)) {
             AutoImport(main_window, choice);
         }
         return;
     }
-    if (!FrontendCommon::NeedsLegacyProfileImport()) {
-        return;
-    }
-    // Fritchii imports on its own; the original choice dialog stays behind a switch for support.
-    if (qEnvironmentVariableIntValue("EDEN_NX2_IMPORT_PROMPT") == 0) {
-        AutoImport(main_window);
-        return;
-    }
-    {
-        namespace Migration = Common::FS::ProfileMigration;
-        const auto state_dir = FrontendCommon::ProfileImportStateDirectory();
-        if (Migration::GetState(state_dir) == Migration::State::Pending) {
-            const auto answer = QMessageBox::question(
-                main_window, QObject::tr("Recover unfinished import"),
-                QObject::tr("An earlier import did not finish. Recover the previous profile "
-                            "and retry? No source or backup data will be deleted."),
-                QMessageBox::Retry | QMessageBox::Close, QMessageBox::Retry);
-            if (answer != QMessageBox::Retry) {
-                throw std::runtime_error(
-                    "Import recovery was postponed. Relaunch Fritchii to retry.");
-            }
-            Migration::Recover(state_dir);
-        }
-        ShowMigrationPrompt(main_window);
-    }
+    // Genesis auto-detects keys, firmware, and games without forcing a legacy profile copy.
+    return;
 }
 
 void UserDataMigrator::ShowMigrationPrompt(QMainWindow* main_window) {

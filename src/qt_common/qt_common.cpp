@@ -225,9 +225,9 @@ std::string BuildVersionString() {
     const auto build_id = std::string(Common::g_build_id);
 
     const auto yuzu_build =
-        std::string_view{Common::g_build_name} == "Fritchii"
-            ? fmt::format("Fritchii {} | {}-{}", Common::g_build_version, branch_name, description)
-            : fmt::format("Fritchii Development Build | {}-{}", branch_name, description);
+        std::string_view{Common::g_build_name} == "Genesis"
+            ? fmt::format("Genesis {} | {}-{}", Common::g_build_version, branch_name, description)
+            : fmt::format("Genesis Development Build | {}-{}", branch_name, description);
     const auto override_build =
         fmt::format(fmt::runtime(std::string(Common::g_title_bar_format_idle)), build_id);
     return override_build.empty() ? yuzu_build : override_build;
@@ -260,7 +260,7 @@ void Init(QWidget* root) {
     const auto processor_count = std::thread::hardware_concurrency();
 
     // info logging
-    LOG_INFO(Frontend, "Fritchii Version: {}", BuildVersionString());
+    LOG_INFO(Frontend, "Genesis Version: {}", BuildVersionString());
     if (const auto stamp = Common::BuildStamp(); !stamp.empty()) {
         LOG_INFO(Frontend, "Build hash: {}", stamp);
     }

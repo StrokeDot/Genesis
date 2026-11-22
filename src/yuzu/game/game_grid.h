@@ -6,6 +6,8 @@
 #include <QListView>
 #include <QString>
 
+#include "qt_common/game_list/scan_index.h"
+
 class GameCard;
 class GameListModel;
 
@@ -16,7 +18,9 @@ public:
     explicit GameGrid(QWidget* parent = nullptr);
 
     void SetModel(GameListModel* model);
-    void ApplyFilter(const QString& edit_filter_text, GameListModel* model);
+    void ApplyFilter(const QString& edit_filter_text, GameListModel* model,
+                     GameListIndex::SystemFilter system_filter =
+                         GameListIndex::SystemFilter::All);
     void UpdateIconSize();
 
     QModelIndex indexAt(const QPoint& point) const override;

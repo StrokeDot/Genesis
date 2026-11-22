@@ -284,9 +284,9 @@ add_executable(yuzu
 # starts it, for v5.x updaters (they require and restart lichii.exe) and old shortcuts. Linux keeps
 # bin/lichii for now (the AppImage packaging and its updater name it).
 if (WIN32)
-    set_target_properties(yuzu PROPERTIES OUTPUT_NAME "fritchii")
+    set_target_properties(yuzu PROPERTIES OUTPUT_NAME "genesis")
 else()
-    set_target_properties(yuzu PROPERTIES OUTPUT_NAME "lichii")
+    set_target_properties(yuzu PROPERTIES OUTPUT_NAME "genesis")
 endif()
 
 # Shipped next to the executable: the NX2 switches a GUI launch cannot set another way. Read at

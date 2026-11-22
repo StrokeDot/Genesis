@@ -32,6 +32,7 @@ class GameListModel : public QStandardItemModel {
 public:
     enum Column {
         COLUMN_NAME,
+        COLUMN_SYSTEM,
         COLUMN_FILE_TYPE,
         COLUMN_SIZE,
         COLUMN_PLAY_TIME,
@@ -47,6 +48,10 @@ public:
 
     void AddDirEntry(GameListDir* entry_items);
     void AddEntry(const QList<QStandardItem*>& entry_items, GameListDir* parent);
+    void AddDeferredEntry(const QList<QStandardItem*>& entry_items, const QString& dir_path,
+                          bool is_auto_detected);
+    void UpdateTitleAddOns(u64 program_id, const QString& patch_versions);
+    void UpdateTitleIcon(u64 program_id, const std::vector<u8>& picture_data);
     void DonePopulating(const QStringList& watch_list);
 
     void PopulateAsync(QVector<UISettings::GameDir>& game_dirs);

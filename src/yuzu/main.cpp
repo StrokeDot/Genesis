@@ -522,7 +522,8 @@ int main(int argc, char* argv[]) {
     // also reads these variables, for this process only (nothing system-wide changes). A value
     // already set (the player's, or nx2_switches.txt) wins. Every Fritchii build, the classic UI
     // (FRITCHII_CLASSIC_UI=1) included: the cache is about the game, not the interface.
-    if (std::string_view{Common::g_build_name} == "Fritchii") {
+    if (std::string_view{Common::g_build_name} == "Genesis" ||
+        std::string_view{Common::g_build_name} == "Fritchii") {
         if (!qEnvironmentVariableIsSet("__GL_SHADER_DISK_CACHE_SKIP_CLEANUP")) {
             qputenv("__GL_SHADER_DISK_CACHE_SKIP_CLEANUP", "1");
         }
@@ -664,7 +665,7 @@ int main(int argc, char* argv[]) {
                     &MainWindow::OnAppFocusStateChanged);
         return app.exec();
     } catch (const std::exception& exception) {
-        QMessageBox::critical(nullptr, QObject::tr("Fritchii startup stopped"),
+        QMessageBox::critical(nullptr, QObject::tr("Genesis startup stopped"),
                               QString::fromUtf8(exception.what()));
         return EXIT_FAILURE;
     }

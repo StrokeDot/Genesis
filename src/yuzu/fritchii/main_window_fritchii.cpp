@@ -59,29 +59,8 @@ void MainWindow::SetUpFritchiiUi() {
          .whats_new = [this] { FritchiiUi::ShowWhatsNew(this); },
          .delete_shader_cache = [delete_shader_cache] { delete_shader_cache(OcarinaOfTime); }});
 
-    // "What's new" once per version after an update, when nothing else is on screen: no other
-    // dialog (first-launch question, update offer, restart note) and no game running.
-    const bool used_before = Settings::values.oot_fps_asked.GetValue();
-    if (FritchiiUi::ShouldShowWhatsNew(used_before)) {
-        auto* timer = new QTimer(this);
-        timer->setInterval(1500);
-        connect(timer, &QTimer::timeout, this, [this, timer] {
-            const bool first_question_pending =
-                !launched_with_game && !Settings::values.oot_fps_asked.GetValue();
-            if (QApplication::activeModalWidget() != nullptr || first_question_pending ||
-                emulation_running || boot_in_progress) {
-                return;
-            }
-            timer->stop();
-            timer->deleteLater();
-            FritchiiUi::MarkWhatsNewSeen();
-            OnSaveConfig();
-            FritchiiUi::ShowWhatsNew(this);
-        });
-        timer->start();
-    } else if (!used_before) {
-        OnSaveConfig(); // a first install recorded its version
-    }
+    // Genesis does not show Fritchii's "What's new" startup popup.
+    FritchiiUi::MarkWhatsNewSeen();
 
     // Status bar: the everyday controls stay (60/30 FPS, docked, volume); renderer, accuracy,
     // filter, anti-aliasing and effects move into one Graphics button. The old buttons stay
