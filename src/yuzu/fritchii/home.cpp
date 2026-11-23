@@ -136,7 +136,7 @@ std::vector<Game> CollectGames(QStandardItemModel* model, const QPixmap& fallbac
         game.path = path;
         game.program_id = item->data(GameListItemPath::ProgramIdRole).toULongLong();
         game.generation = GameListIndex::ClassifyConsoleGeneration(game.program_id);
-        if (!GameListIndex::MatchesSystemFilter(game.generation, filter)) {
+        if (!GameListIndex::MatchesSystemFilter(filter, game.generation)) {
             return;
         }
         game.title = item->data(GameListItemPath::TitleRole).toString();
