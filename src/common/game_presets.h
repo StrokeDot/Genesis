@@ -40,10 +40,6 @@ inline bool ApplySwitch1StabilityPreset(Values& settings, u64 program_id) {
         setting.SetValue(value);
     };
     session_if_global(settings.use_graphics_pipeline_library, false);
-    if (settings.gpu_accuracy.UsingGlobal() &&
-        settings.gpu_accuracy.GetValue(true) == GpuAccuracy::Low) {
-        session_if_global(settings.gpu_accuracy, GpuAccuracy::Normal);
-    }
     session_if_global(settings.use_reactive_flushing, true);
     return true;
 }

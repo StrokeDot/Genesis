@@ -2585,7 +2585,7 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
         Settings::UpdateGPUAccuracy();
         LOG_INFO(Config,
                  "Applied automatic Switch 1 stability profile for {:016X} "
-                 "(GPL off, Occlusion speed-up off, GPU accuracy Normal)",
+                 "(GPL off, Occlusion speed-up off, Reactive flushing on)",
                  title_id);
     }
 
