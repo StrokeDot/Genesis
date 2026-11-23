@@ -119,28 +119,30 @@ void ConfigureInput::Initialize(InputCommon::InputSubsystem* input_subsystem_,
     for (std::size_t i = 0; i < player_tabs.size(); ++i) {
         QHBoxLayout* tab_layout = new QHBoxLayout(player_tabs[i]);
         tab_layout->addWidget(player_controllers[i]);
-        connect(player_controllers[i], &ConfigureInputPlayer::Connected, [this, i](bool checked) {
-            // Ensures that connecting a controller changes the number of players
-            if (connected_controller_checkboxes[i]->isChecked() != checked) {
-                // Ensures that the players are always connected in sequential order
-                PropagatePlayerNumberChanged(i, checked);
-            }
-        });
-        connect(connected_controller_checkboxes[i], &QCheckBox::clicked, [this, i](bool checked) {
-            // Reconnect current controller if it was the last one checked
-            // (player number was reduced by more than one)
-            const bool reconnect_first = !checked &&
-                                         i < connected_controller_checkboxes.size() - 1 &&
-                                         connected_controller_checkboxes[i + 1]->isChecked();
+        connect(player_controllers[i], &ConfigureInputPlayer::Connected, this,
+                [this, i](bool checked) {
+                    // Ensures that connecting a controller changes the number of players
+                    if (connected_controller_checkboxes[i]->isChecked() != checked) {
+                        // Ensures that the players are always connected in sequential order
+                        PropagatePlayerNumberChanged(i, checked);
+                    }
+                });
+        connect(connected_controller_checkboxes[i], &QCheckBox::clicked, this,
+                [this, i](bool checked) {
+                    // Reconnect current controller if it was the last one checked
+                    // (player number was reduced by more than one)
+                    const bool reconnect_first = !checked &&
+                                                 i < connected_controller_checkboxes.size() - 1 &&
+                                                 connected_controller_checkboxes[i + 1]->isChecked();
 
-            // Ensures that the players are always connected in sequential order
-            PropagatePlayerNumberChanged(i, checked, reconnect_first);
-        });
+                    // Ensures that the players are always connected in sequential order
+                    PropagatePlayerNumberChanged(i, checked, reconnect_first);
+                });
         connect(player_controllers[i], &ConfigureInputPlayer::RefreshInputDevices, this,
                 &ConfigureInput::UpdateAllInputDevices);
         connect(player_controllers[i], &ConfigureInputPlayer::RefreshInputProfiles, this,
                 &ConfigureInput::UpdateAllInputProfiles, Qt::QueuedConnection);
-        connect(connected_controller_checkboxes[i], &QCheckBox::STATE_CHANGED,
+        connect(connected_controller_checkboxes[i], &QCheckBox::STATE_CHANGED, this,
                 [this, i](int state) {
                     // If Player 2+ connects while Player 1 is Handheld, switch Player 1 to Pro
                     // Controller so multiplayer works immediately in Switch 1 games.

@@ -297,19 +297,19 @@ public:
      * Updates the current mapped button device
      * @param param ParamPackage with controller data to be mapped
      */
-    void SetButtonParam(std::size_t index, Common::ParamPackage param);
+    void SetButtonParam(std::size_t index, Common::ParamPackage param, bool reload = true);
 
     /**
      * Updates the current mapped stick device
      * @param param ParamPackage with controller data to be mapped
      */
-    void SetStickParam(std::size_t index, Common::ParamPackage param);
+    void SetStickParam(std::size_t index, Common::ParamPackage param, bool reload = true);
 
     /**
      * Updates the current mapped motion device
      * @param param ParamPackage with controller data to be mapped
      */
-    void SetMotionParam(std::size_t index, Common::ParamPackage param);
+    void SetMotionParam(std::size_t index, Common::ParamPackage param, bool reload = true);
 
     /// Auto calibrates the current motion devices
     void StartMotionCalibration();

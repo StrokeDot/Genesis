@@ -175,7 +175,19 @@ ConfigureDialog::ConfigureDialog(QWidget* parent, HotkeyRegistry& registry_,
     ui->buttonBox->setFocus();
 }
 
-ConfigureDialog::~ConfigureDialog() = default;
+ConfigureDialog::~ConfigureDialog() {
+    if (category_stack != nullptr) {
+        category_stack->hide();
+    }
+    // Destroy the Controls QTabWidget (whose reparented pages belong to input_tab) BEFORE
+    // input_tab is destroyed, so ConfigureInputPlayer never outlives ConfigureInput/InputProfiles
+    // or triggers showEvent() on a freed bottom_row during QTabWidget teardown.
+    const int controls_cat = FritchiiUi::Enabled() ? 2 : 5;
+    if (category_tab_widgets[controls_cat] != nullptr) {
+        delete category_tab_widgets[controls_cat];
+        category_tab_widgets[controls_cat] = nullptr;
+    }
+}
 
 void ConfigureDialog::SetConfiguration() {}
 

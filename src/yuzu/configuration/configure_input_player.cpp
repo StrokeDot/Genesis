@@ -1047,7 +1047,7 @@ void ConfigureInputPlayer::ClearAll() {
         if (button == nullptr) {
             continue;
         }
-        emulated_controller->SetButtonParam(button_id, {});
+        emulated_controller->SetButtonParam(button_id, {}, false);
     }
 
     for (int analog_id = 0; analog_id < Settings::NativeAnalog::NumAnalogs; ++analog_id) {
@@ -1056,7 +1056,7 @@ void ConfigureInputPlayer::ClearAll() {
             if (analog_button == nullptr) {
                 continue;
             }
-            emulated_controller->SetStickParam(analog_id, {});
+            emulated_controller->SetStickParam(analog_id, {}, false);
         }
     }
 
@@ -1065,9 +1065,10 @@ void ConfigureInputPlayer::ClearAll() {
         if (motion_button == nullptr) {
             continue;
         }
-        emulated_controller->SetMotionParam(motion_id, {});
+        emulated_controller->SetMotionParam(motion_id, {}, false);
     }
 
+    emulated_controller->ReloadInput();
     UpdateUI();
     UpdateInputDevices();
 }
@@ -1458,7 +1459,7 @@ void ConfigureInputPlayer::UpdateMappingWithDefaults() {
         if (button == nullptr) {
             continue;
         }
-        emulated_controller->SetButtonParam(button_id, {});
+        emulated_controller->SetButtonParam(button_id, {}, false);
     }
 
     for (int analog_id = 0; analog_id < Settings::NativeAnalog::NumAnalogs; ++analog_id) {
@@ -1467,7 +1468,7 @@ void ConfigureInputPlayer::UpdateMappingWithDefaults() {
             if (analog_button == nullptr) {
                 continue;
             }
-            emulated_controller->SetStickParam(analog_id, {});
+            emulated_controller->SetStickParam(analog_id, {}, false);
         }
     }
 
@@ -1476,15 +1477,17 @@ void ConfigureInputPlayer::UpdateMappingWithDefaults() {
         if (motion_button == nullptr) {
             continue;
         }
-        emulated_controller->SetMotionParam(motion_id, {});
+        emulated_controller->SetMotionParam(motion_id, {}, false);
     }
 
     // Reset keyboard or mouse bindings
     if (ui->comboDevices->currentIndex() == 1 || ui->comboDevices->currentIndex() == 2) {
         for (int button_id = 0; button_id < Settings::NativeButton::NumButtons; ++button_id) {
             emulated_controller->SetButtonParam(
-                button_id, Common::ParamPackage{InputCommon::GenerateKeyboardParam(
-                               QtConfig::default_buttons[button_id])});
+                button_id,
+                Common::ParamPackage{
+                    InputCommon::GenerateKeyboardParam(QtConfig::default_buttons[button_id])},
+                false);
         }
         for (int analog_id = 0; analog_id < Settings::NativeAnalog::NumAnalogs; ++analog_id) {
             Common::ParamPackage analog_param{};
@@ -1496,17 +1499,20 @@ void ConfigureInputPlayer::UpdateMappingWithDefaults() {
 
             analog_param.Set("modifier", InputCommon::GenerateKeyboardParam(
                                              QtConfig::default_stick_mod[analog_id]));
-            emulated_controller->SetStickParam(analog_id, analog_param);
+            emulated_controller->SetStickParam(analog_id, analog_param, false);
         }
 
         for (int motion_id = 0; motion_id < Settings::NativeMotion::NumMotions; ++motion_id) {
             emulated_controller->SetMotionParam(
-                motion_id, Common::ParamPackage{InputCommon::GenerateKeyboardParam(
-                               QtConfig::default_motions[motion_id])});
+                motion_id,
+                Common::ParamPackage{
+                    InputCommon::GenerateKeyboardParam(QtConfig::default_motions[motion_id])},
+                false);
         }
 
         // If mouse is selected we want to override with mappings from the driver
         if (ui->comboDevices->currentIndex() == 1) {
+            emulated_controller->ReloadInput();
             UpdateUI();
             return;
         }
@@ -1520,16 +1526,19 @@ void ConfigureInputPlayer::UpdateMappingWithDefaults() {
 
     for (const auto& button_mapping : button_mappings) {
         const std::size_t index = button_mapping.first;
-        emulated_controller->SetButtonParam(index, button_mapping.second);
+        emulated_controller->SetButtonParam(index, button_mapping.second, false);
     }
     for (const auto& analog_mapping : analog_mappings) {
         const std::size_t index = analog_mapping.first;
-        emulated_controller->SetStickParam(index, analog_mapping.second);
+        emulated_controller->SetStickParam(index, analog_mapping.second, false);
     }
     for (const auto& motion_mapping : motion_mappings) {
         const std::size_t index = motion_mapping.first;
-        emulated_controller->SetMotionParam(index, motion_mapping.second);
+        emulated_controller->SetMotionParam(index, motion_mapping.second, false);
     }
+
+    // Reload all mapped input/output devices ONCE instead of 56 times in a row.
+    emulated_controller->ReloadInput();
 
     // Automatically connect this player when the user explicitly selects a controller device.
     if (!debug && player_index < 8 && !ui->groupConnectedController->isChecked()) {

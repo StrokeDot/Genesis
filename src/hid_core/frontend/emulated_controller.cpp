@@ -728,28 +728,36 @@ Common::ParamPackage EmulatedController::GetMotionParam(std::size_t index) const
     return motion_params[index];
 }
 
-void EmulatedController::SetButtonParam(std::size_t index, Common::ParamPackage param) {
+void EmulatedController::SetButtonParam(std::size_t index, Common::ParamPackage param,
+                                        bool reload) {
     if (index >= button_params.size()) {
         return;
     }
     button_params[index] = std::move(param);
-    ReloadInput();
+    if (reload) {
+        ReloadInput();
+    }
 }
 
-void EmulatedController::SetStickParam(std::size_t index, Common::ParamPackage param) {
+void EmulatedController::SetStickParam(std::size_t index, Common::ParamPackage param, bool reload) {
     if (index >= stick_params.size()) {
         return;
     }
     stick_params[index] = std::move(param);
-    ReloadInput();
+    if (reload) {
+        ReloadInput();
+    }
 }
 
-void EmulatedController::SetMotionParam(std::size_t index, Common::ParamPackage param) {
+void EmulatedController::SetMotionParam(std::size_t index, Common::ParamPackage param,
+                                        bool reload) {
     if (index >= motion_params.size()) {
         return;
     }
     motion_params[index] = std::move(param);
-    ReloadInput();
+    if (reload) {
+        ReloadInput();
+    }
 }
 
 void EmulatedController::StartMotionCalibration() {

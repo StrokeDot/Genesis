@@ -224,18 +224,15 @@ QtControllerSelectorDialog::QtControllerSelectorDialog(
                 QCoreApplication::postEvent(this, event);
             });
 
-    // Enhancement: Check if the parameters have already been met before disconnecting controllers.
-    // If all the parameters are met AND only allows a single player,
-    // stop the constructor here as we do not need to continue.
-    const bool already_met = CheckIfParametersMet();
-    if (already_met && parameters.enable_single_mode) {
+    // Enhancement: If the already-connected controllers satisfy the game's requirements
+    // (single-player OR multi-player like Mario Kart 8 Deluxe 2P), skip the popup completely.
+    if (CheckIfParametersMet()) {
         return;
     }
 
-    // If keep_controllers_connected is false, only disconnect controllers when the current setup
-    // does not already satisfy the applet requirements. Preserving an already-valid multi-player
-    // configuration prevents games like Mario Kart 8 Deluxe 2P from wiping Player 1 & Player 2.
-    if (!parameters.keep_controllers_connected && !already_met) {
+    // If keep_controllers_connected is false and the current setup does not satisfy the game,
+    // clear checked slots so the user can pick the required controllers.
+    if (!parameters.keep_controllers_connected) {
         for (auto player : player_groupboxes) {
             player->setChecked(false);
         }
@@ -250,7 +247,7 @@ QtControllerSelectorDialog::~QtControllerSelectorDialog() {
 }
 
 int QtControllerSelectorDialog::exec() {
-    if (parameters_met && parameters.enable_single_mode) {
+    if (parameters_met) {
         return QDialog::Accepted;
     }
     return QDialog::exec();

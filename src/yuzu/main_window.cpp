@@ -2543,12 +2543,17 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
 
     last_filename_booted = filename;
 
+    // Keep the Windows message queue responsive while mounting large NSP/XCI files and
+    // initializing the core so DWM does not grey out the window as "(Not Responding)".
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
     QtCommon::Content::configureFilesystemProvider(filename.toStdString());
     const auto v_file = Core::GetGameFileFromPath(QtCommon::vfs, filename.toUtf8().constData());
     const auto loader =
         Loader::GetLoader(*QtCommon::system, v_file, params.program_id, params.program_index);
 
     if (loader != nullptr && loader->ReadProgramId(title_id) == Loader::ResultStatus::Success) {
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         QtCommon::Content::EnsureTitleContentRegistered(title_id);
         if (type == StartGameType::Normal) {
             // Load per game settings
@@ -2562,6 +2567,7 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
             QtCommon::system->ApplySettings();
         }
     }
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     // OoT's render height patch is decided while the game loads, before the renderer exists: a DLSS
     // "on" saved for another card must not lower it (per-game settings are in by now).
