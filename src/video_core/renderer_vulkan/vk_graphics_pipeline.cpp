@@ -3034,6 +3034,11 @@ bool GraphicsPipeline::ConfigureDraw(const RescalingPushConstant& rescaling,
                                  key.unique_hashes[1] != 0 ? key.unique_hashes[1]
                                                            : key.unique_hashes[0],
                                  key.unique_hashes[5]);
+        } else if (scheduler.GraphicsPipelineMissing() || !pipeline || build->Failed()) {
+            return;
+        }
+        if (!pipeline_layout) {
+            return;
         }
         const VkShaderStageFlags push_stages =
             mesh_emulation ? VK_SHADER_STAGE_ALL_GRAPHICS | VK_SHADER_STAGE_COMPUTE_BIT

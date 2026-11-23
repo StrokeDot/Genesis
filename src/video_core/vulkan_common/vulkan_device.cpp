@@ -27,6 +27,7 @@
 #include "common/assert.h"
 #include "common/fs/fs.h"
 #include "common/fs/path_util.h"
+#include "common/game_presets.h"
 #include "common/literals.h"
 #include "common/memory_detect.h"
 #include "common/nx2_hitch.h"
@@ -1026,9 +1027,13 @@ Device::Device(VkInstance instance_, vk::PhysicalDevice physical_, VkSurfaceKHR 
                                VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME);
     }
     // FRITCHII_OCCL_FLAG: the session's value (a switch, else the Occlusion speed-up setting),
-    // read once per game boot.
-    const bool occl_flag_wanted = VideoCommon::OcclFlag::ReadAtBoot(
-        VideoCommon::OcclFlag::FromSetting(Settings::values.occlusion_speedup.GetValue()));
+    // read once per game boot. Disabled automatically on Switch 1 titles so Switch 2 / OoT
+    // occlusion shader variants do not interfere with Switch 1 games.
+    const int occl_setting =
+        Settings::IsSwitch1Session()
+            ? VideoCommon::OcclFlag::Off
+            : VideoCommon::OcclFlag::FromSetting(Settings::values.occlusion_speedup.GetValue());
+    const bool occl_flag_wanted = VideoCommon::OcclFlag::ReadAtBoot(occl_setting);
 #ifdef EGLANTINE_STREAMLINE
     // NVIDIA's DLSS needs buffer device addresses: keep the feature enabled for
     // it, but leave the emulator's own buffers as they are without descriptor buffers.

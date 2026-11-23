@@ -2579,6 +2579,16 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
                                          VkDeviceInfo::RunsDlss(vk_device_records[card]));
     }
 
+    Settings::SetSwitch1Session(Settings::IsSwitch1ProgramId(title_id));
+    if (Settings::ApplySwitch1StabilityPreset(Settings::values, title_id)) {
+        QtCommon::system->ApplySettings();
+        Settings::UpdateGPUAccuracy();
+        LOG_INFO(Config,
+                 "Applied automatic Switch 1 stability profile for {:016X} "
+                 "(GPL off, Occlusion speed-up off, GPU accuracy Normal)",
+                 title_id);
+    }
+
     if (title_id == Settings::MarioKartWorldProgramId && !asked_recommended_mkw_settings) {
         asked_recommended_mkw_settings = true;
         use_recommended_mkw_settings =
