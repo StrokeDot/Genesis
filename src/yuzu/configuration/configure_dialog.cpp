@@ -115,34 +115,33 @@ ConfigureDialog::ConfigureDialog(QWidget* parent, HotkeyRegistry& registry_,
     if (FritchiiUi::Enabled()) {
         // After the first group is shown: its pages sit in scroll areas by then, so the window
         // can take a normal size.
+        setWindowFlags(windowFlags() | Qt::WindowMaximizeButtonHint |
+                       Qt::WindowMinimizeButtonHint);
         setWindowTitle(tr("Settings"));
         ui->label->setText(tr("Some settings can't change while a game runs."));
         ui->label->setVisible(system.IsPoweredOn());
-        ui->selectorList->setFixedWidth(180);
+        ui->selectorList->setFixedWidth(145);
         layout()->setSizeConstraint(QLayout::SetNoConstraint);
         setMinimumSize(640, 460);
-        // Wide enough for the Controls page's button columns and controller preview, but never
-        // bigger than the screen it opens on (2026-11-16: it opened taller than a 1080p screen):
-        // after the first layout pass, fit it into 90% x 85% of that screen and center it on
-        // the main window.
-        resize(1080, 700);
-        QTimer::singleShot(0, this, [this] {
-            QScreen* const screen = parentWidget() != nullptr && parentWidget()->screen() != nullptr
+        // Open maximized so every Settings & Controls option is visible without moving or
+        // scrolling the dialog, while keeping a generous restored size if un-maximized.
+        if (QScreen* const screen = parentWidget() != nullptr && parentWidget()->screen() != nullptr
                                         ? parentWidget()->screen()
                                         : this->screen();
-            if (screen == nullptr) {
-                return;
-            }
+            screen != nullptr) {
             const QRect area = screen->availableGeometry();
-            const int w = std::min({1080, area.width() * 9 / 10, std::max(this->width(), 640)});
-            const int h = std::min({760, area.height() * 85 / 100, std::max(this->height(), 460)});
+            const int w = std::min(1440, area.width() * 94 / 100);
+            const int h = std::min(880, area.height() * 90 / 100);
             resize(w, h);
-            const QRect anchor =
-                parentWidget() != nullptr ? parentWidget()->frameGeometry() : area;
-            QPoint top_left = anchor.center() - QPoint(w / 2, h / 2);
-            top_left.setX(std::clamp(top_left.x(), area.left(), area.right() - w));
-            top_left.setY(std::clamp(top_left.y(), area.top(), area.bottom() - h));
-            move(top_left);
+            move(area.center() - QPoint(w / 2, h / 2));
+        } else {
+            resize(1360, 820);
+        }
+        setWindowState(windowState() | Qt::WindowMaximized);
+        QTimer::singleShot(0, this, [this] {
+            if (!isMaximized()) {
+                showMaximized();
+            }
         });
 
         // OoT's own values (Configure Game) beat these, the usual "my settings didn't apply".

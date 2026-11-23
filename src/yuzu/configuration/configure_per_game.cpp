@@ -422,10 +422,18 @@ ConfigurePerGame::ConfigurePerGame(QWidget* parent, u64 title_id_, const std::st
     setFocusPolicy(Qt::ClickFocus);
     setWindowTitle(tr("Properties"));
     if (FritchiiUi::Enabled()) {
+        setWindowFlags(windowFlags() | Qt::WindowMaximizeButtonHint |
+                       Qt::WindowMinimizeButtonHint);
         setWindowTitle(tr("Game Settings"));
         ui->tabWidget->setTabText(tab_index(graphics_advanced_tab.get()), tr("Advanced Graphics"));
         ui->tabWidget->setTabText(tab_index(graphics_extensions_tab.get()), tr("Graphics Extras"));
         ui->tabWidget->setTabText(tab_index(input_tab.get()), tr("Controls"));
+        setWindowState(windowState() | Qt::WindowMaximized);
+        QTimer::singleShot(0, this, [this] {
+            if (!isMaximized()) {
+                showMaximized();
+            }
+        });
     }
 
     if (SettingsInOnePlace(title_id)) {

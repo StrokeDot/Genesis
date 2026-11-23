@@ -149,7 +149,7 @@ bool ApplyTheme() {
         QApplication::setStyle(new GraphiteStyle);
     }
     QFont font(QStringLiteral("Inter"));
-    font.setPixelSize(14);
+    font.setPixelSize(12);
     QApplication::setFont(font);
     QApplication::setPalette(GraphitePalette());
     // Folder and refresh icons come from the dark icon set.

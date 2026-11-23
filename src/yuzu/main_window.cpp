@@ -550,7 +550,7 @@ MainWindow::MainWindow(bool has_broken_vulkan)
 
     UpdateWindowTitle();
 
-    show();
+    showMaximized();
 
 #ifdef ENABLE_UPDATE_CHECKER
     connect(&update_watcher, &QFutureWatcher<UpdateChecker::CheckResult>::finished, this,
