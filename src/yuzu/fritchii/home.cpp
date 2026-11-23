@@ -195,7 +195,10 @@ Home::Home(QMainWindow* window_, QBoxLayout* central, QWidget* game_list_, QWidg
     refresh_timer->setInterval(150);
     connect(refresh_timer, &QTimer::timeout, this, &Home::Refresh);
     if (hooks.model) {
-        const auto later = [this] { refresh_timer->start(); };
+        const auto later = [this] {
+            sections_dirty = true;
+            refresh_timer->start();
+        };
         connect(hooks.model, &QAbstractItemModel::rowsInserted, this, later);
         connect(hooks.model, &QAbstractItemModel::rowsRemoved, this, later);
         connect(hooks.model, &QAbstractItemModel::modelReset, this, later);
@@ -304,6 +307,7 @@ QWidget* Home::MakePage() {
     connect(system_filter_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
             [this](int idx) {
                 UISettings::values.system_filter = static_cast<u8>(std::clamp(idx, 0, 2));
+                sections_dirty = true;
                 Refresh();
             });
     links->addWidget(system_filter_combo);
@@ -389,7 +393,28 @@ QWidget* Home::MakePage() {
     return page;
 }
 
+void Home::UpdateHero(const QString& path, u64 program_id, const QString& game_title,
+                      bool is_switch2, const QPixmap& icon) {
+    hero_path = path;
+    hero_id = program_id;
+    cover->setPixmap(Rounded(icon, CoverSize, 18));
+    cover->show();
+    system_badge->setText(is_switch2 ? tr("SWITCH 2") : tr("SWITCH 1"));
+    system_badge->setStyleSheet(
+        is_switch2 ? QStringLiteral("QLabel { background-color: #5c2028; color: #fca5a5; "
+                                    "border-radius: 6px; padding: 4px 10px; font-size: 11px; "
+                                    "font-weight: 600; }")
+                   : QStringLiteral("QLabel { background-color: #312e59; color: #c4b5fd; "
+                                    "border-radius: 6px; padding: 4px 10px; font-size: 11px; "
+                                    "font-weight: 600; }"));
+    system_badge->show();
+    title->setText(game_title);
+    play->setText(tr("Play"));
+    play->setIcon(Glyph(QStringLiteral("play"), 0x1c1433, 18));
+}
+
 void Home::Refresh() {
+    sections_dirty = false;
     const auto filter = static_cast<GameListIndex::SystemFilter>(
         std::clamp<int>(static_cast<int>(UISettings::values.system_filter.GetValue()), 0, 2));
     if (system_filter_combo && system_filter_combo->currentIndex() != static_cast<int>(filter)) {
@@ -427,23 +452,8 @@ void Home::Refresh() {
     }
 
     if (hero) {
-        hero_path = hero->path;
-        hero_id = hero->program_id;
-        cover->setPixmap(Rounded(hero->icon, CoverSize, 18));
-        cover->show();
-        const bool is_sw2 = hero->generation == GameListIndex::ConsoleGeneration::Switch2;
-        system_badge->setText(is_sw2 ? tr("SWITCH 2") : tr("SWITCH 1"));
-        system_badge->setStyleSheet(
-            is_sw2 ? QStringLiteral("QLabel { background-color: #5c2028; color: #fca5a5; "
-                                    "border-radius: 6px; padding: 4px 10px; font-size: 11px; "
-                                    "font-weight: 600; }")
-                   : QStringLiteral("QLabel { background-color: #312e59; color: #c4b5fd; "
-                                    "border-radius: 6px; padding: 4px 10px; font-size: 11px; "
-                                    "font-weight: 600; }"));
-        system_badge->show();
-        title->setText(hero->title);
-        play->setText(tr("Play"));
-        play->setIcon(Glyph(QStringLiteral("play"), 0x1c1433, 18));
+        UpdateHero(hero->path, hero->program_id, hero->title,
+                   hero->generation == GameListIndex::ConsoleGeneration::Switch2, hero->icon);
     } else {
         hero_path.clear();
         hero_id = 0;
@@ -455,7 +465,7 @@ void Home::Refresh() {
     }
 
     // Rebuild the separated Switch 1 / Switch 2 rows.
-    // deleteLater: a tile's own click can land here.
+    sections_box->setUpdatesEnabled(false);
     while (QLayoutItem* item = sections_layout->takeAt(0)) {
         if (QWidget* widget = item->widget()) {
             widget->hide();
@@ -519,11 +529,11 @@ void Home::Refresh() {
             const QFontMetrics metrics(button->font());
             button->setText(metrics.elidedText(game->title, Qt::ElideRight, TileIcon + 24));
             button->setToolTip(game->title);
+            const bool is_sw2 = game->generation == GameListIndex::ConsoleGeneration::Switch2;
             connect(button, &QToolButton::clicked, this,
-                    [this, path = game->path, id = game->program_id] {
-                        hero_path = path;
-                        hero_id = id;
-                        Refresh();
+                    [this, path = game->path, id = game->program_id, game_title = game->title,
+                     is_sw2, icon = game->icon] {
+                        UpdateHero(path, id, game_title, is_sw2, icon);
                     });
             row->addWidget(button);
         }
@@ -536,6 +546,7 @@ void Home::Refresh() {
     add_section(tr("Nintendo Switch"), QStringLiteral("#c4b5fd"), sw1_games);
     add_section(tr("Nintendo Switch 2"), QStringLiteral("#fca5a5"), sw2_games);
     sections_layout->addStretch(1);
+    sections_box->setUpdatesEnabled(true);
 }
 
 void Home::ShowHome() {
@@ -545,7 +556,9 @@ void Home::ShowHome() {
     rail->show();
     page->show();
     library_button->setChecked(true);
-    Refresh();
+    if (sections_dirty) {
+        Refresh();
+    }
 }
 
 void Home::ShowList() {

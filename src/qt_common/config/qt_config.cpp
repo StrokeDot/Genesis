@@ -3,6 +3,9 @@
 
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <fmt/format.h>
+#include "common/fs/fs.h"
+#include "common/fs/path_util.h"
 #include "common/logging.h"
 #include "input_common/main.h"
 #include "qt_config.h"
@@ -95,6 +98,30 @@ void QtConfig::ReadQtPlayerValues(const std::size_t player_index) {
             player = Settings::values.players.GetValue(true)[player_index];
             player.profile_name = "";
             return;
+        }
+        if (type == ConfigType::PerGameConfig) {
+            const auto profile_path = Common::FS::GetEdenPath(Common::FS::EdenPath::ConfigDir) /
+                                      "input" / fmt::format("{}.ini", profile_name);
+            if (Common::FS::Exists(profile_path)) {
+                const auto saved_connected = player.connected;
+                const auto saved_vibration_enabled = player.vibration_enabled;
+                const auto saved_vibration_strength = player.vibration_strength;
+                const auto saved_body_color_left = player.body_color_left;
+                const auto saved_body_color_right = player.body_color_right;
+                const auto saved_button_color_left = player.button_color_left;
+                const auto saved_button_color_right = player.button_color_right;
+                QtConfig profile_config(profile_name, ConfigType::InputProfile);
+                profile_config.ReadQtControlPlayerValues(player_index);
+                player.profile_name = profile_name;
+                player.connected = saved_connected;
+                player.vibration_enabled = saved_vibration_enabled;
+                player.vibration_strength = saved_vibration_strength;
+                player.body_color_left = saved_body_color_left;
+                player.body_color_right = saved_body_color_right;
+                player.button_color_left = saved_button_color_left;
+                player.button_color_right = saved_button_color_right;
+                return;
+            }
         }
     }
 

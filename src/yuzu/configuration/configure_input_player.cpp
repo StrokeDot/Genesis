@@ -11,6 +11,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QMouseEvent>
+#include <QSignalBlocker>
 #include <QTimer>
 #include "common/assert.h"
 #include "common/param_package.h"
@@ -290,16 +291,20 @@ QString ConfigureInputPlayer::AnalogToText(const Common::ParamPackage& param,
     return QObject::tr("[unknown]");
 }
 
-ConfigureInputPlayer::ConfigureInputPlayer(QWidget* parent, std::size_t player_index_,
-                                           QWidget* bottom_row_,
-                                           InputCommon::InputSubsystem* input_subsystem_,
-                                           InputProfiles* profiles_, Core::HID::HIDCore& hid_core_,
-                                           bool is_powered_on_, bool debug_)
+ConfigureInputPlayer::ConfigureInputPlayer(
+    QWidget* parent, std::size_t player_index_, QWidget* bottom_row_,
+    InputCommon::InputSubsystem* input_subsystem_, InputProfiles* profiles_,
+    Core::HID::HIDCore& hid_core_, bool is_powered_on_, bool debug_,
+    const std::vector<Common::ParamPackage>* preloaded_devices,
+    const std::vector<std::string>* preloaded_profiles)
     : QWidget(parent), ui(std::make_unique<Ui::ConfigureInputPlayer>()),
       player_index{player_index_}, debug{debug_}, is_powered_on{is_powered_on_},
       input_subsystem{input_subsystem_}, profiles(profiles_),
       timeout_timer(std::make_unique<QTimer>()), poll_timer(std::make_unique<QTimer>()),
       bottom_row{bottom_row_}, hid_core{hid_core_} {
+    if (player_index < Settings::values.players.GetValue().size()) {
+        selected_profile_name = Settings::values.players.GetValue()[player_index].profile_name;
+    }
     if (player_index == 0) {
         auto* emulated_controller_p1 =
             hid_core.GetEmulatedController(Core::HID::NpadIdType::Player1);
@@ -814,7 +819,7 @@ ConfigureInputPlayer::ConfigureInputPlayer(QWidget* parent, std::size_t player_i
         }
     });
 
-    UpdateInputProfiles();
+    UpdateInputProfiles(preloaded_profiles);
 
     connect(ui->buttonProfilesNew, &QPushButton::clicked, this,
             &ConfigureInputPlayer::CreateProfile);
@@ -825,7 +830,7 @@ ConfigureInputPlayer::ConfigureInputPlayer(QWidget* parent, std::size_t player_i
     connect(ui->buttonProfilesSave, &QPushButton::clicked, this,
             &ConfigureInputPlayer::SaveProfile);
 
-    LoadConfiguration();
+    LoadConfiguration(preloaded_devices);
 }
 
 ConfigureInputPlayer::~ConfigureInputPlayer() {
@@ -842,6 +847,7 @@ ConfigureInputPlayer::~ConfigureInputPlayer() {
 }
 
 void ConfigureInputPlayer::ApplyConfiguration() {
+    static constexpr size_t HANDHELD_INDEX = 8;
     if (player_index == 0) {
         auto* emulated_controller_p1 =
             hid_core.GetEmulatedController(Core::HID::NpadIdType::Player1);
@@ -853,11 +859,16 @@ void ConfigureInputPlayer::ApplyConfiguration() {
         emulated_controller_handheld->DisableConfiguration();
         emulated_controller_handheld->SaveCurrentConfig();
         emulated_controller_handheld->EnableConfiguration();
+        Settings::values.players.GetValue()[0].profile_name = selected_profile_name;
+        Settings::values.players.GetValue()[HANDHELD_INDEX].profile_name = selected_profile_name;
         return;
     }
     emulated_controller->DisableConfiguration();
     emulated_controller->SaveCurrentConfig();
     emulated_controller->EnableConfiguration();
+    if (player_index < Settings::values.players.GetValue().size()) {
+        Settings::values.players.GetValue()[player_index].profile_name = selected_profile_name;
+    }
 }
 
 void ConfigureInputPlayer::showEvent(QShowEvent* event) {
@@ -881,11 +892,12 @@ void ConfigureInputPlayer::RetranslateUI() {
     UpdateUI();
 }
 
-void ConfigureInputPlayer::LoadConfiguration() {
+void ConfigureInputPlayer::LoadConfiguration(
+    const std::vector<Common::ParamPackage>* preloaded_devices) {
     emulated_controller->ReloadFromSettings();
 
     UpdateUI();
-    UpdateInputDeviceCombobox();
+    UpdateInputDeviceCombobox(preloaded_devices);
 
     if (debug) {
         return;
@@ -906,15 +918,27 @@ void ConfigureInputPlayer::ConnectPlayer(bool connected) {
     }
 }
 
-void ConfigureInputPlayer::UpdateInputDeviceCombobox() {
-    // Skip input device persistence if "Input Devices" is set to "Any".
-    if (ui->comboDevices->currentIndex() == 0) {
-        UpdateInputDevices();
+void ConfigureInputPlayer::SwitchFromHandheldToPro() {
+    if (player_index != 0 || debug) {
         return;
     }
+    const auto current_type =
+        GetControllerTypeFromIndex(ui->comboControllerType->currentIndex());
+    if (current_type != Core::HID::NpadStyleIndex::Handheld) {
+        return;
+    }
+    const int pro_idx = GetIndexFromControllerType(Core::HID::NpadStyleIndex::Fullkey);
+    if (pro_idx >= 0) {
+        ui->comboControllerType->setCurrentIndex(pro_idx);
+    }
+}
+
+void ConfigureInputPlayer::UpdateInputDeviceCombobox(
+    const std::vector<Common::ParamPackage>* preloaded_devices) {
+    const QSignalBlocker blocker(ui->comboDevices);
 
     const auto devices = emulated_controller->GetMappedDevices();
-    UpdateInputDevices();
+    UpdateInputDevices(preloaded_devices);
 
     if (devices.empty()) {
         return;
@@ -930,19 +954,44 @@ void ConfigureInputPlayer::UpdateInputDeviceCombobox() {
     const auto first_port = devices[0].Get("port", 0);
     const auto first_pad = devices[0].Get("pad", 0);
 
+    const auto add_offline_device = [&](const Common::ParamPackage& saved,
+                                        const QString& label) {
+        Common::ParamPackage offline = saved;
+        offline.Set("offline", 1);
+        input_devices.push_back(std::move(offline));
+        ui->comboDevices->addItem(label, {});
+        ui->comboDevices->setCurrentIndex(ui->comboDevices->count() - 1);
+    };
+
     if (devices.size() == 1) {
+        const bool match_pad = (first_engine == "joycon" || first_engine == "gcpad");
         const auto devices_it = std::find_if(
             input_devices.begin(), input_devices.end(),
-            [first_engine, first_guid, first_port, first_pad](const Common::ParamPackage& param) {
+            [&](const Common::ParamPackage& param) {
                 return param.Get("engine", "") == first_engine &&
-                       param.Get("guid", "") == first_guid && param.Get("port", 0) == first_port &&
-                       param.Get("pad", 0) == first_pad;
+                       param.Get("guid", "") == first_guid &&
+                       param.Get("port", 0) == first_port &&
+                       (!match_pad || param.Get("pad", 0) == first_pad);
             });
-        const int device_index =
-            devices_it != input_devices.end()
-                ? static_cast<int>(std::distance(input_devices.begin(), devices_it))
-                : 0;
-        ui->comboDevices->setCurrentIndex(device_index);
+        if (devices_it != input_devices.end()) {
+            ui->comboDevices->setCurrentIndex(
+                static_cast<int>(std::distance(input_devices.begin(), devices_it)));
+            return;
+        }
+        // Preserve offline/disconnected saved controller instead of resetting dropdown to "Any".
+        if (first_engine == "sdl" || first_engine == "joycon" || first_engine == "gcpad" ||
+            first_engine == "cemuhookudp") {
+            const QString engine_label =
+                first_engine == "sdl"          ? tr("Saved Controller")
+                : first_engine == "joycon"     ? tr("Saved Joy-Con")
+                : first_engine == "gcpad"      ? tr("Saved GameCube Controller")
+                                               : tr("Saved UDP Controller");
+            add_offline_device(
+                devices[0],
+                tr("%1 (Port %2 - Disconnected)").arg(engine_label).arg(first_port));
+            return;
+        }
+        ui->comboDevices->setCurrentIndex(0);
         return;
     }
 
@@ -972,11 +1021,17 @@ void ConfigureInputPlayer::UpdateInputDeviceCombobox() {
                 return param.Get("engine", "") == first_engine && is_guid_valid &&
                        param.Get("port", 0) == first_port;
             });
-        const int device_index =
-            devices_it != input_devices.end()
-                ? static_cast<int>(std::distance(input_devices.begin(), devices_it))
-                : 0;
-        ui->comboDevices->setCurrentIndex(device_index);
+        if (devices_it != input_devices.end()) {
+            ui->comboDevices->setCurrentIndex(
+                static_cast<int>(std::distance(input_devices.begin(), devices_it)));
+            return;
+        }
+        if (first_engine == "sdl" || first_engine == "joycon") {
+            add_offline_device(devices[0],
+                               tr("Saved Dual Controller (Port %1 - Disconnected)").arg(first_port));
+            return;
+        }
+        ui->comboDevices->setCurrentIndex(0);
     } else {
         ui->comboDevices->setCurrentIndex(0);
     }
@@ -1173,8 +1228,9 @@ int ConfigureInputPlayer::GetIndexFromControllerType(Core::HID::NpadStyleIndex t
     return it->first;
 }
 
-void ConfigureInputPlayer::UpdateInputDevices() {
-    input_devices = input_subsystem->GetInputDevices();
+void ConfigureInputPlayer::UpdateInputDevices(
+    const std::vector<Common::ParamPackage>* preloaded_devices) {
+    input_devices = preloaded_devices ? *preloaded_devices : input_subsystem->GetInputDevices();
     ui->comboDevices->clear();
     for (const auto& device : input_devices) {
         ui->comboDevices->addItem(QString::fromStdString(device.Get("display", "Unknown")), {});
@@ -1388,7 +1444,12 @@ void ConfigureInputPlayer::UpdateControllerButtonNames() {
 }
 
 void ConfigureInputPlayer::UpdateMappingWithDefaults() {
-    if (ui->comboDevices->currentIndex() == 0) {
+    const int idx = ui->comboDevices->currentIndex();
+    if (idx <= 0 || idx >= static_cast<int>(input_devices.size())) {
+        return;
+    }
+    // Never wipe saved bindings if the user clicks the preserved offline controller entry.
+    if (input_devices[idx].Get("offline", 0) != 0) {
         return;
     }
 
@@ -1468,6 +1529,12 @@ void ConfigureInputPlayer::UpdateMappingWithDefaults() {
     for (const auto& motion_mapping : motion_mappings) {
         const std::size_t index = motion_mapping.first;
         emulated_controller->SetMotionParam(index, motion_mapping.second);
+    }
+
+    // Automatically connect this player when the user explicitly selects a controller device.
+    if (!debug && player_index < 8 && !ui->groupConnectedController->isChecked()) {
+        ConnectPlayer(true);
+        emit Connected(true);
     }
 
     UpdateUI();
@@ -1603,8 +1670,14 @@ void ConfigureInputPlayer::CreateProfile() {
         return;
     }
 
+    selected_profile_name = profile_name.toStdString();
+    if (player_index < Settings::values.players.GetValue().size()) {
+        Settings::values.players.GetValue()[player_index].profile_name = selected_profile_name;
+    }
+
     emit RefreshInputProfiles(player_index);
 
+    const QSignalBlocker blocker(ui->comboProfiles);
     ui->comboProfiles->addItem(profile_name);
     ui->comboProfiles->setCurrentIndex(ui->comboProfiles->count() - 1);
 }
@@ -1624,8 +1697,16 @@ void ConfigureInputPlayer::DeleteProfile() {
         return;
     }
 
+    if (selected_profile_name == profile_name.toStdString()) {
+        selected_profile_name.clear();
+        if (player_index < Settings::values.players.GetValue().size()) {
+            Settings::values.players.GetValue()[player_index].profile_name.clear();
+        }
+    }
+
     emit RefreshInputProfiles(player_index);
 
+    const QSignalBlocker blocker(ui->comboProfiles);
     ui->comboProfiles->removeItem(ui->comboProfiles->currentIndex());
     ui->comboProfiles->setCurrentIndex(-1);
 }
@@ -1647,7 +1728,20 @@ void ConfigureInputPlayer::LoadProfile() {
         return;
     }
 
+    selected_profile_name = profile_name.toStdString();
+    if (player_index < Settings::values.players.GetValue().size()) {
+        auto& player = Settings::values.players.GetValue()[player_index];
+        player.profile_name = selected_profile_name;
+        // Loading a profile onto a player slot means the user intends to play with that controller.
+        if (!debug && player_index < 8) {
+            player.connected = true;
+        }
+    }
+
     LoadConfiguration();
+    if (!debug && player_index < 8) {
+        emit Connected(true);
+    }
 }
 
 void ConfigureInputPlayer::SaveProfile() {
@@ -1658,6 +1752,7 @@ void ConfigureInputPlayer::SaveProfile() {
         return;
     }
 
+    selected_profile_name = profile_name.toStdString();
     ApplyConfiguration();
 
     // When we're in handheld mode, only the handheld emulated controller bindings are updated
@@ -1674,21 +1769,28 @@ void ConfigureInputPlayer::SaveProfile() {
     }
 }
 
-void ConfigureInputPlayer::UpdateInputProfiles() {
+void ConfigureInputPlayer::UpdateInputProfiles(
+    const std::vector<std::string>* preloaded_profiles) {
+    const QSignalBlocker blocker(ui->comboProfiles);
     ui->comboProfiles->clear();
 
     // Set current profile as empty by default
     int profile_index = -1;
 
     // Add every available profile and search the player profile to set it as current one
-    auto& current_profile = Settings::values.players.GetValue()[player_index].profile_name;
-    std::vector<std::string> profile_names = profiles->GetInputProfileNames();
-    std::string profile_name;
+    const std::string& current_profile =
+        !selected_profile_name.empty()
+            ? selected_profile_name
+            : (player_index < Settings::values.players.GetValue().size()
+                   ? Settings::values.players.GetValue()[player_index].profile_name
+                   : selected_profile_name);
+    const std::vector<std::string> profile_names =
+        preloaded_profiles ? *preloaded_profiles : profiles->GetInputProfileNames();
     for (size_t i = 0; i < profile_names.size(); i++) {
-        profile_name = profile_names[i];
+        const std::string& profile_name = profile_names[i];
         ui->comboProfiles->addItem(QString::fromStdString(profile_name));
         if (current_profile == profile_name) {
-            profile_index = (int)i;
+            profile_index = static_cast<int>(i);
         }
     }
 

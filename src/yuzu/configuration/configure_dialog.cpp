@@ -10,6 +10,8 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QScreen>
+#include <QStackedWidget>
+#include <QTabWidget>
 #include <QTimer>
 #include "common/logging.h"
 #include "common/settings.h"
@@ -40,10 +42,11 @@
 #include "yuzu/fritchii/fritchii_ui.h"
 
 ConfigureDialog::ConfigureDialog(QWidget* parent, HotkeyRegistry& registry_,
-                                 InputCommon::InputSubsystem* input_subsystem,
+                                 InputCommon::InputSubsystem* input_subsystem_,
                                  std::vector<VkDeviceInfo::Record>& vk_device_records,
                                  Core::System& system_, bool enable_web_config)
     : QDialog(parent), ui{std::make_unique<Ui::ConfigureDialog>()}, registry(registry_),
+      input_subsystem{input_subsystem_},
       system{system_},
       builder{std::make_unique<ConfigurationShared::Builder>(this, !system_.IsPoweredOn())},
       applets_tab{std::make_unique<ConfigureApplets>(system_, nullptr, *builder, this)},
@@ -64,7 +67,6 @@ ConfigureDialog::ConfigureDialog(QWidget* parent, HotkeyRegistry& registry_,
           },
           nullptr, *builder, this)},
       hotkeys_tab{std::make_unique<ConfigureHotkeys>(system_.HIDCore(), this)},
-      input_tab{std::make_unique<ConfigureInput>(system_, this)},
       network_tab{std::make_unique<ConfigureNetwork>(system_, this)},
       profile_tab{std::make_unique<ConfigureProfileManager>(system_, this)},
       system_tab{std::make_unique<ConfigureSystem>(system_, nullptr, *builder, this)},
@@ -73,38 +75,29 @@ ConfigureDialog::ConfigureDialog(QWidget* parent, HotkeyRegistry& registry_,
 
     ui->setupUi(this);
 
-    ui->tabWidget->addTab(applets_tab.get(), tr("Applets"));
-    ui->tabWidget->addTab(audio_tab.get(), tr("Audio"));
-    ui->tabWidget->addTab(cpu_tab.get(), tr("CPU"));
-    ui->tabWidget->addTab(debug_tab_tab.get(), tr("Debug"));
-    ui->tabWidget->addTab(filesystem_tab.get(), tr("Filesystem"));
-    ui->tabWidget->addTab(general_tab.get(), tr("General"));
-    ui->tabWidget->addTab(graphics_tab.get(), tr("Graphics"));
-    ui->tabWidget->addTab(graphics_advanced_tab.get(), tr("GraphicsAdvanced"));
-    ui->tabWidget->addTab(graphics_extensions_tab.get(), tr("GraphicsExtra"));
-    ui->tabWidget->addTab(hotkeys_tab.get(), tr("Hotkeys"));
-    ui->tabWidget->addTab(input_tab.get(), tr("Controls"));
-    ui->tabWidget->addTab(profile_tab.get(), tr("Profiles"));
-    ui->tabWidget->addTab(network_tab.get(), tr("Network"));
-    ui->tabWidget->addTab(system_tab.get(), tr("System"));
-    ui->tabWidget->addTab(ui_tab.get(), tr("Game List"));
-    ui->tabWidget->addTab(web_tab.get(), tr("Web"));
+    // Replace the single clear-and-rebuild QTabWidget with a QStackedWidget holding one cached
+    // QTabWidget per sidebar category so switching categories is instant (<1 ms).
+    ui->tabWidget->hide();
+    category_stack = new QStackedWidget(this);
+    ui->horizontalLayout->addWidget(category_stack, 1);
+
+    // Hide eager tabs until their category page is lazily shown.
+    for (QWidget* w : std::initializer_list<QWidget*>{
+             applets_tab.get(), audio_tab.get(), cpu_tab.get(), debug_tab_tab.get(),
+             filesystem_tab.get(), general_tab.get(), graphics_tab.get(),
+             graphics_advanced_tab.get(), graphics_extensions_tab.get(), hotkeys_tab.get(),
+             profile_tab.get(), network_tab.get(), system_tab.get(), ui_tab.get(), web_tab.get()}) {
+        w->hide();
+    }
 
     web_tab->SetWebServiceConfigEnabled(enable_web_config);
     hotkeys_tab->Populate(registry);
-
-    input_tab->Initialize(input_subsystem);
 
     general_tab->SetResetCallback([&] { this->close(); });
 
     SetConfiguration();
     PopulateSelectionList();
 
-    connect(ui->tabWidget, &QTabWidget::currentChanged, this, [this](int index) {
-        if (index != -1) {
-            debug_tab_tab->SetCurrentIndex(0);
-        }
-    });
     connect(ui_tab.get(), &ConfigureUi::LanguageChanged, this, &ConfigureDialog::OnLanguageChanged);
     connect(general_tab.get(), &ConfigureGeneral::ExternalContentDirsChanged, this,
             &ConfigureDialog::ExternalContentDirsChanged);
@@ -193,7 +186,9 @@ void ConfigureDialog::ApplyConfiguration() {
     system_tab->ApplyConfiguration();
     profile_tab->ApplyConfiguration();
     filesystem_tab->ApplyConfiguration();
-    input_tab->ApplyConfiguration();
+    if (input_initialized && input_tab) {
+        input_tab->ApplyConfiguration();
+    }
     hotkeys_tab->ApplyConfiguration(registry);
     cpu_tab->ApplyConfiguration();
     graphics_tab->ApplyConfiguration();
@@ -218,15 +213,32 @@ void ConfigureDialog::changeEvent(QEvent* event) {
 
 void ConfigureDialog::RetranslateUI() {
     const int old_row = ui->selectorList->currentRow();
-    const int old_index = ui->tabWidget->currentIndex();
+    int old_index = -1;
+    if (old_row >= 0 && old_row < static_cast<int>(category_tab_widgets.size()) &&
+        category_tab_widgets[old_row] != nullptr) {
+        old_index = category_tab_widgets[old_row]->currentIndex();
+    }
 
     ui->retranslateUi(this);
 
     PopulateSelectionList();
-    ui->selectorList->setCurrentRow(old_row);
+    for (int cat = 0; cat < static_cast<int>(category_tab_widgets.size()); ++cat) {
+        auto* tw = category_tab_widgets[cat];
+        if (!tw) {
+            continue;
+        }
+        const auto tabs = GetCategorySubTabs(cat);
+        for (int i = 0; i < tw->count() && i < tabs.size(); ++i) {
+            tw->setTabText(i, tabs[i]->accessibleName());
+        }
+    }
 
+    ui->selectorList->setCurrentRow(old_row);
     UpdateVisibleTabs();
-    ui->tabWidget->setCurrentIndex(old_index);
+    if (old_row >= 0 && old_row < static_cast<int>(category_tab_widgets.size()) &&
+        category_tab_widgets[old_row] != nullptr && old_index >= 0) {
+        category_tab_widgets[old_row]->setCurrentIndex(old_index);
+    }
 }
 
 void ConfigureDialog::HandleApplyButtonClicked() {
@@ -234,33 +246,65 @@ void ConfigureDialog::HandleApplyButtonClicked() {
     ApplyConfiguration();
 }
 
-Q_DECLARE_METATYPE(QList<QWidget*>);
+void ConfigureDialog::EnsureInputInitialized() {
+    if (input_initialized) {
+        return;
+    }
+    input_tab = std::make_unique<ConfigureInput>(system, this);
+    input_tab->hide();
+    input_tab->Initialize(input_subsystem);
+    input_initialized = true;
+}
+
+QList<QWidget*> ConfigureDialog::GetCategorySubTabs(int category_index) {
+    if (FritchiiUi::Enabled()) {
+        switch (category_index) {
+        case 0:
+            return {general_tab.get(), ui_tab.get(), hotkeys_tab.get()};
+        case 1:
+            return {graphics_tab.get(), graphics_advanced_tab.get(), graphics_extensions_tab.get()};
+        case 2:
+            EnsureInputInitialized();
+            return input_tab->GetSubTabs();
+        case 3:
+            return {audio_tab.get()};
+        case 4:
+            return {system_tab.get(), profile_tab.get()};
+        case 5:
+            return {cpu_tab.get(), network_tab.get(), filesystem_tab.get(), applets_tab.get(),
+                    web_tab.get(), debug_tab_tab.get()};
+        default:
+            return {};
+        }
+    }
+
+    switch (category_index) {
+    case 0:
+        return {general_tab.get(), hotkeys_tab.get(), ui_tab.get(), web_tab.get(),
+                debug_tab_tab.get()};
+    case 1:
+        return {system_tab.get(), profile_tab.get(), network_tab.get(), filesystem_tab.get(),
+                applets_tab.get()};
+    case 2:
+        return {cpu_tab.get()};
+    case 3:
+        return {graphics_tab.get(), graphics_advanced_tab.get(), graphics_extensions_tab.get()};
+    case 4:
+        return {audio_tab.get()};
+    case 5:
+        EnsureInputInitialized();
+        return input_tab->GetSubTabs();
+    default:
+        return {};
+    }
+}
 
 void ConfigureDialog::PopulateSelectionList() {
-    const std::array<std::pair<QString, QList<QWidget*>>, 6> items{
-        {{tr("General"),
-          {general_tab.get(), hotkeys_tab.get(), ui_tab.get(), web_tab.get(), debug_tab_tab.get()}},
-         {tr("System"),
-          {system_tab.get(), profile_tab.get(), network_tab.get(), filesystem_tab.get(),
-           applets_tab.get()}},
-         {tr("CPU"), {cpu_tab.get()}},
-         {tr("Graphics"),
-          {graphics_tab.get(), graphics_advanced_tab.get(), graphics_extensions_tab.get()}},
-         {tr("Audio"), {audio_tab.get()}},
-         {tr("Controls"), input_tab->GetSubTabs()}},
+    const std::array<QString, 6> classic_labels{
+        tr("General"), tr("System"), tr("CPU"), tr("Graphics"), tr("Audio"), tr("Controls"),
     };
-
-    // Fritchii: everyday settings first, everything a player rarely needs under Advanced.
-    const std::array<std::pair<QString, QList<QWidget*>>, 6> fritchii_items{
-        {{tr("General"), {general_tab.get(), ui_tab.get(), hotkeys_tab.get()}},
-         {tr("Graphics"),
-          {graphics_tab.get(), graphics_advanced_tab.get(), graphics_extensions_tab.get()}},
-         {tr("Controls"), input_tab->GetSubTabs()},
-         {tr("Audio"), {audio_tab.get()}},
-         {tr("System"), {system_tab.get(), profile_tab.get()}},
-         {tr("Advanced"),
-          {cpu_tab.get(), network_tab.get(), filesystem_tab.get(), applets_tab.get(),
-           web_tab.get(), debug_tab_tab.get()}}},
+    const std::array<QString, 6> modern_labels{
+        tr("General"), tr("Graphics"), tr("Controls"), tr("Audio"), tr("System"), tr("Advanced"),
     };
     if (FritchiiUi::Enabled()) {
         ui_tab->setAccessibleName(tr("Interface"));
@@ -271,10 +315,10 @@ void ConfigureDialog::PopulateSelectionList() {
     [[maybe_unused]] const QSignalBlocker blocker(ui->selectorList);
 
     ui->selectorList->clear();
-    for (const auto& entry : FritchiiUi::Enabled() ? fritchii_items : items) {
-        auto* const item = new QListWidgetItem(entry.first);
-        item->setData(Qt::UserRole, QVariant::fromValue(entry.second));
-
+    const auto& labels = FritchiiUi::Enabled() ? modern_labels : classic_labels;
+    for (int i = 0; i < static_cast<int>(labels.size()); ++i) {
+        auto* const item = new QListWidgetItem(labels[i]);
+        item->setData(Qt::UserRole, i);
         ui->selectorList->addItem(item);
     }
 }
@@ -295,14 +339,33 @@ void ConfigureDialog::UpdateVisibleTabs() {
         return;
     }
 
-    [[maybe_unused]] const QSignalBlocker blocker(ui->tabWidget);
-
-    ui->tabWidget->clear();
-
-    const auto tabs = qvariant_cast<QList<QWidget*>>(items[0]->data(Qt::UserRole));
-
-    for (auto* const tab : tabs) {
-        LOG_DEBUG(Frontend, "{}", tab->accessibleName().toStdString());
-        ui->tabWidget->addTab(FritchiiUi::SettingsPage(tab), tab->accessibleName());
+    const int cat = items[0]->data(Qt::UserRole).toInt();
+    if (cat < 0 || cat >= static_cast<int>(category_tab_widgets.size())) {
+        return;
     }
+
+    QTabWidget* tw = category_tab_widgets[cat];
+    if (tw == nullptr) {
+        category_stack->setUpdatesEnabled(false);
+        tw = new QTabWidget(category_stack);
+        tw->setUpdatesEnabled(false);
+        const auto tabs = GetCategorySubTabs(cat);
+        for (auto* const tab : tabs) {
+            LOG_DEBUG(Frontend, "{}", tab->accessibleName().toStdString());
+            QWidget* page = FritchiiUi::SettingsPage(tab);
+            tab->show();
+            tw->addTab(page, tab->accessibleName());
+        }
+        connect(tw, &QTabWidget::currentChanged, this, [this](int index) {
+            if (index != -1) {
+                debug_tab_tab->SetCurrentIndex(0);
+            }
+        });
+        tw->setUpdatesEnabled(true);
+        category_stack->addWidget(tw);
+        category_tab_widgets[cat] = tw;
+        category_stack->setUpdatesEnabled(true);
+    }
+
+    category_stack->setCurrentWidget(tw);
 }

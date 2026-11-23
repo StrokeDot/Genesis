@@ -431,22 +431,20 @@ private:
 };
 
 std::shared_ptr<SDLJoystick> SDLDriver::GetSDLJoystickByGUID(const Common::UUID& guid, int port) {
-    std::scoped_lock lock{joystick_map_mutex};
-    const auto it = joystick_map.find(guid);
-
-    if (it != joystick_map.end()) {
-        while (it->second.size() <= static_cast<std::size_t>(port)) {
-            auto joystick = std::make_shared<SDLJoystick>(guid, static_cast<int>(it->second.size()),
-                                                          nullptr, nullptr);
-            it->second.emplace_back(std::move(joystick));
-        }
-
-        return it->second[static_cast<std::size_t>(port)];
+    if (port < 0) {
+        port = 0;
     }
 
-    auto joystick = std::make_shared<SDLJoystick>(guid, 0, nullptr, nullptr);
+    std::scoped_lock lock{joystick_map_mutex};
+    auto& joystick_list = joystick_map[guid];
 
-    return joystick_map[guid].emplace_back(std::move(joystick));
+    while (joystick_list.size() <= static_cast<std::size_t>(port)) {
+        auto joystick = std::make_shared<SDLJoystick>(guid, static_cast<int>(joystick_list.size()),
+                                                      nullptr, nullptr);
+        joystick_list.emplace_back(std::move(joystick));
+    }
+
+    return joystick_list[static_cast<std::size_t>(port)];
 }
 
 std::shared_ptr<SDLJoystick> SDLDriver::GetSDLJoystickByGUID(const std::string& guid, int port) {
@@ -565,6 +563,7 @@ void SDLDriver::InitJoystick(SDL_JoystickID joystick_id) {
 
     if (joystick_it != joystick_guid_list.end()) {
         (*joystick_it)->SetSDLJoystick(sdl_joystick, sdl_gamecontroller);
+        PreSetController((*joystick_it)->GetPadIdentifier());
         (*joystick_it)->EnableMotion();
         SetBattery((*joystick_it)->GetPadIdentifier(),
                    (*joystick_it)->GetBatteryLevel(battery_state, battery_percent));
@@ -581,6 +580,10 @@ void SDLDriver::InitJoystick(SDL_JoystickID joystick_id) {
 }
 
 void SDLDriver::CloseJoystick(SDL_Joystick* sdl_joystick) {
+    if (sdl_joystick == nullptr) {
+        return;
+    }
+
     const auto guid = GetGUID(sdl_joystick);
 
     std::scoped_lock lock{joystick_map_mutex};
@@ -672,7 +675,7 @@ void SDLDriver::CloseJoysticks() {
 SDLDriver::SDLDriver(std::string input_engine_) : InputEngine(std::move(input_engine_)) {
     // Set our application name. Currently passed to DBus by SDL and visible to the user through
     // their desktop environment.
-    SDL_SetHint(SDL_HINT_APP_NAME, "Fritchii");
+    SDL_SetHint(SDL_HINT_APP_NAME, "Genesis");
 
     // Disable raw input. When enabled this setting causes SDL to die when a web applet opens
     SDL_SetHint(SDL_HINT_JOYSTICK_RAWINPUT, Settings::values.enable_raw_input ? "1" : "0");

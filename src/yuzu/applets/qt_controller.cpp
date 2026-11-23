@@ -227,12 +227,15 @@ QtControllerSelectorDialog::QtControllerSelectorDialog(
     // Enhancement: Check if the parameters have already been met before disconnecting controllers.
     // If all the parameters are met AND only allows a single player,
     // stop the constructor here as we do not need to continue.
-    if (CheckIfParametersMet() && parameters.enable_single_mode) {
+    const bool already_met = CheckIfParametersMet();
+    if (already_met && parameters.enable_single_mode) {
         return;
     }
 
-    // If keep_controllers_connected is false, forcefully disconnect all controllers
-    if (!parameters.keep_controllers_connected) {
+    // If keep_controllers_connected is false, only disconnect controllers when the current setup
+    // does not already satisfy the applet requirements. Preserving an already-valid multi-player
+    // configuration prevents games like Mario Kart 8 Deluxe 2P from wiping Player 1 & Player 2.
+    if (!parameters.keep_controllers_connected && !already_met) {
         for (auto player : player_groupboxes) {
             player->setChecked(false);
         }

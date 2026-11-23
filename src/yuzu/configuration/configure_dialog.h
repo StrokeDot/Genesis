@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <array>
 #include <memory>
 #include <vector>
 #include <QDialog>
@@ -13,6 +14,9 @@
 #include "qt_common/config/shared_translation.h"
 #include "qt_common/util/vk.h"
 #include "yuzu/configuration/configuration_shared.h"
+
+class QStackedWidget;
+class QTabWidget;
 
 namespace Core {
 class System;
@@ -73,9 +77,16 @@ private:
     void SetConfiguration();
     void UpdateVisibleTabs();
     void PopulateSelectionList();
+    void EnsureInputInitialized();
+    QList<QWidget*> GetCategorySubTabs(int category_index);
 
     std::unique_ptr<Ui::ConfigureDialog> ui;
     HotkeyRegistry& registry;
+    InputCommon::InputSubsystem* input_subsystem = nullptr;
+    bool input_initialized = false;
+
+    QStackedWidget* category_stack = nullptr;
+    std::array<QTabWidget*, 6> category_tab_widgets{};
 
     Core::System& system;
     std::unique_ptr<ConfigurationShared::Builder> builder;

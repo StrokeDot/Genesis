@@ -15,6 +15,7 @@
 #include "core/hle/service/sm/sm.h"
 #include "hid_core/frontend/emulated_controller.h"
 #include "hid_core/hid_core.h"
+#include "input_common/main.h"
 #include "qt_common/qt_compat.h"
 #include "ui_configure_input.h"
 #include "ui_configure_input_advanced.h"
@@ -64,27 +65,39 @@ ConfigureInput::ConfigureInput(Core::System& system_, QWidget* parent)
 ConfigureInput::~ConfigureInput() = default;
 
 /// Initialize controller and microphone pages, sharing the active system with host capture preview.
-void ConfigureInput::Initialize(InputCommon::InputSubsystem* input_subsystem,
+void ConfigureInput::Initialize(InputCommon::InputSubsystem* input_subsystem_,
                                 std::size_t max_players) {
+    input_subsystem = input_subsystem_;
     const bool is_powered_on = system.IsPoweredOn();
     auto& hid_core = system.HIDCore();
+    // Query devices and profile names ONCE and share across all 8 player tabs (8x faster open).
+    const auto initial_devices = input_subsystem->GetInputDevices();
+    const auto initial_profiles = profiles->GetInputProfileNames();
     player_controllers = {
         new ConfigureInputPlayer(this, 0, ui->consoleInputSettings, input_subsystem, profiles.get(),
-                                 hid_core, is_powered_on),
+                                 hid_core, is_powered_on, false, &initial_devices,
+                                 &initial_profiles),
         new ConfigureInputPlayer(this, 1, ui->consoleInputSettings, input_subsystem, profiles.get(),
-                                 hid_core, is_powered_on),
+                                 hid_core, is_powered_on, false, &initial_devices,
+                                 &initial_profiles),
         new ConfigureInputPlayer(this, 2, ui->consoleInputSettings, input_subsystem, profiles.get(),
-                                 hid_core, is_powered_on),
+                                 hid_core, is_powered_on, false, &initial_devices,
+                                 &initial_profiles),
         new ConfigureInputPlayer(this, 3, ui->consoleInputSettings, input_subsystem, profiles.get(),
-                                 hid_core, is_powered_on),
+                                 hid_core, is_powered_on, false, &initial_devices,
+                                 &initial_profiles),
         new ConfigureInputPlayer(this, 4, ui->consoleInputSettings, input_subsystem, profiles.get(),
-                                 hid_core, is_powered_on),
+                                 hid_core, is_powered_on, false, &initial_devices,
+                                 &initial_profiles),
         new ConfigureInputPlayer(this, 5, ui->consoleInputSettings, input_subsystem, profiles.get(),
-                                 hid_core, is_powered_on),
+                                 hid_core, is_powered_on, false, &initial_devices,
+                                 &initial_profiles),
         new ConfigureInputPlayer(this, 6, ui->consoleInputSettings, input_subsystem, profiles.get(),
-                                 hid_core, is_powered_on),
+                                 hid_core, is_powered_on, false, &initial_devices,
+                                 &initial_profiles),
         new ConfigureInputPlayer(this, 7, ui->consoleInputSettings, input_subsystem, profiles.get(),
-                                 hid_core, is_powered_on),
+                                 hid_core, is_powered_on, false, &initial_devices,
+                                 &initial_profiles),
     };
 
     player_tabs = {
@@ -129,6 +142,11 @@ void ConfigureInput::Initialize(InputCommon::InputSubsystem* input_subsystem,
                 &ConfigureInput::UpdateAllInputProfiles, Qt::QueuedConnection);
         connect(connected_controller_checkboxes[i], &QCheckBox::STATE_CHANGED,
                 [this, i](int state) {
+                    // If Player 2+ connects while Player 1 is Handheld, switch Player 1 to Pro
+                    // Controller so multiplayer works immediately in Switch 1 games.
+                    if (i > 0 && state == Qt::Checked && player_controllers[0] != nullptr) {
+                        player_controllers[0]->SwitchFromHandheldToPro();
+                    }
                     // Keep activated controllers synced with the "Connected Controllers" checkboxes
                     player_controllers[i]->ConnectPlayer(state == Qt::Checked);
                 });
@@ -152,28 +170,26 @@ void ConfigureInput::Initialize(InputCommon::InputSubsystem* input_subsystem,
     advancedLayout->addWidget(advanced);
 
     connect(advanced, &ConfigureInputAdvanced::CallDebugControllerDialog,
-            [this, input_subsystem, &hid_core, is_powered_on] {
+            [this, &hid_core, is_powered_on] {
                 CallConfigureDialog<ConfigureDebugController>(
                     *this, input_subsystem, profiles.get(), hid_core, is_powered_on);
             });
     connect(advanced, &ConfigureInputAdvanced::CallTouchscreenConfigDialog,
             [this] { CallConfigureDialog<ConfigureTouchscreenAdvanced>(*this); });
-    connect(advanced, &ConfigureInputAdvanced::CallMotionTouchConfigDialog,
-            [this, input_subsystem] {
-                CallConfigureDialog<ConfigureMotionTouch>(*this, input_subsystem);
-            });
-    connect(advanced, &ConfigureInputAdvanced::CallRingControllerDialog,
-            [this, input_subsystem, &hid_core] {
-                CallConfigureDialog<ConfigureRingController>(*this, input_subsystem, hid_core);
-            });
-    connect(advanced, &ConfigureInputAdvanced::CallCameraDialog, [this, input_subsystem] {
+    connect(advanced, &ConfigureInputAdvanced::CallMotionTouchConfigDialog, [this] {
+        CallConfigureDialog<ConfigureMotionTouch>(*this, input_subsystem);
+    });
+    connect(advanced, &ConfigureInputAdvanced::CallRingControllerDialog, [this, &hid_core] {
+        CallConfigureDialog<ConfigureRingController>(*this, input_subsystem, hid_core);
+    });
+    connect(advanced, &ConfigureInputAdvanced::CallCameraDialog, [this] {
         CallConfigureDialog<ConfigureCamera>(*this, input_subsystem);
     });
 
     connect(ui->vibrationButton, &QPushButton::clicked,
             [this, &hid_core] { CallConfigureDialog<ConfigureVibration>(*this, hid_core); });
 
-    connect(ui->motionButton, &QPushButton::clicked, [this, input_subsystem] {
+    connect(ui->motionButton, &QPushButton::clicked, [this] {
         CallConfigureDialog<ConfigureMotionTouch>(*this, input_subsystem);
     });
 
@@ -305,17 +321,22 @@ void ConfigureInput::UpdateDockedState(bool is_handheld) {
 }
 
 void ConfigureInput::UpdateAllInputDevices() {
+    if (!input_subsystem) {
+        return;
+    }
+    const auto devices = input_subsystem->GetInputDevices();
     for (const auto& player : player_controllers) {
-        player->UpdateInputDeviceCombobox();
+        player->UpdateInputDeviceCombobox(&devices);
     }
 }
 
 void ConfigureInput::UpdateAllInputProfiles(std::size_t player_index) {
+    const auto profile_names = profiles->GetInputProfileNames();
     for (std::size_t i = 0; i < player_controllers.size(); ++i) {
         if (i == player_index) {
             continue;
         }
 
-        player_controllers[i]->UpdateInputProfiles();
+        player_controllers[i]->UpdateInputProfiles(&profile_names);
     }
 }

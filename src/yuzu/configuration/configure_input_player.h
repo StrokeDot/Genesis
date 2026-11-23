@@ -50,10 +50,12 @@ class ConfigureInputPlayer : public QWidget {
     Q_OBJECT
 
 public:
-    explicit ConfigureInputPlayer(QWidget* parent, std::size_t player_index, QWidget* bottom_row,
-                                  InputCommon::InputSubsystem* input_subsystem_,
-                                  InputProfiles* profiles_, Core::HID::HIDCore& hid_core_,
-                                  bool is_powered_on_, bool debug = false);
+    explicit ConfigureInputPlayer(
+        QWidget* parent, std::size_t player_index, QWidget* bottom_row,
+        InputCommon::InputSubsystem* input_subsystem_, InputProfiles* profiles_,
+        Core::HID::HIDCore& hid_core_, bool is_powered_on_, bool debug = false,
+        const std::vector<Common::ParamPackage>* preloaded_devices = nullptr,
+        const std::vector<std::string>* preloaded_profiles = nullptr);
     ~ConfigureInputPlayer() override;
 
     /// Save all button configurations to settings file.
@@ -62,11 +64,15 @@ public:
     /// Set the connection state checkbox (used to sync state).
     void ConnectPlayer(bool connected);
 
+    /// Switches Player 1 from Handheld to Pro Controller when Player 2+ connects.
+    void SwitchFromHandheldToPro();
+
     /// Update the input devices combobox.
-    void UpdateInputDeviceCombobox();
+    void UpdateInputDeviceCombobox(
+        const std::vector<Common::ParamPackage>* preloaded_devices = nullptr);
 
     /// Updates the list of controller profiles.
-    void UpdateInputProfiles();
+    void UpdateInputProfiles(const std::vector<std::string>* preloaded_profiles = nullptr);
 
     /// Restore all buttons to their default values.
     void RestoreDefaults();
@@ -100,7 +106,7 @@ private:
     void RetranslateUI();
 
     /// Load configuration settings.
-    void LoadConfiguration();
+    void LoadConfiguration(const std::vector<Common::ParamPackage>* preloaded_devices = nullptr);
 
     /// Called when the button was pressed.
     void HandleClick(QPushButton* button, std::size_t button_id,
@@ -138,7 +144,7 @@ private:
     int GetIndexFromControllerType(Core::HID::NpadStyleIndex type) const;
 
     /// Update the available input devices.
-    void UpdateInputDevices();
+    void UpdateInputDevices(const std::vector<Common::ParamPackage>* preloaded_devices = nullptr);
 
     /// Hides and disables controller settings based on the current controller type.
     void UpdateControllerAvailableButtons();
@@ -218,6 +224,9 @@ private:
     /// List of physical devices users can map with. If a SDL backed device is selected, then you
     /// can use this device to get a default mapping.
     std::vector<Common::ParamPackage> input_devices;
+
+    /// Last selected or loaded profile name for this player slot (persisted to qt-config.ini).
+    std::string selected_profile_name;
 
     /// Bottom row is where console wide settings are held, and its "owned" by the parent
     /// ConfigureInput widget. On show, add this widget to the main layout. This will change the

@@ -60,6 +60,8 @@ private:
     void ShowList();
     void Restore();
     void Refresh();
+    void UpdateHero(const QString& path, u64 program_id, const QString& game_title,
+                    bool is_switch2, const QPixmap& icon);
 
     QWidget* MakeRail();
     QWidget* MakePage();
@@ -83,6 +85,7 @@ private:
     QTimer* refresh_timer = nullptr;
 
     bool list_mode = false;
+    bool sections_dirty = true;
     QString hero_path;
     u64 hero_id = 0;
 };

@@ -81,6 +81,7 @@ private:
     std::array<QCheckBox*, 8> connected_controller_checkboxes{};
     ConfigureInputAdvanced* advanced = nullptr;
     ConfigureMicrophone* microphone = nullptr;
+    InputCommon::InputSubsystem* input_subsystem = nullptr;
 
     Core::System& system;
 };
