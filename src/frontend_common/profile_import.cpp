@@ -105,11 +105,8 @@ std::string TakeProfileImportRequest() {
 }
 
 void CheckLegacyProfileBeforeConfig() {
-    if (NeedsLegacyProfileImport()) {
-        throw std::runtime_error("Legacy emulator data or an unfinished import was found. "
-                                 "Open the Fritchii window to import it or explicitly start "
-                                 "fresh. No configuration was created.");
-    }
+    // Genesis manages its own profile and auto-detects keys, firmware, and games cleanly
+    // without blocking startup when legacy emulator directories are present.
 }
 
 namespace {

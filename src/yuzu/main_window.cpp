@@ -486,7 +486,7 @@ MainWindow::MainWindow(bool has_broken_vulkan)
 
     Common::FS::CreateEdenPaths();
     this->config = std::make_unique<QtConfig>();
-    MigrateFriztiSettings(FriztiStart::AskFirst);
+    MigrateFriztiSettings(FriztiStart::Keep);
     // New mods start disabled: saved at once (from the GUI thread), so a crash keeps it.
     FileSys::PatchManager::SetNewModsCallback([this](u64 title_id) {
         QMetaObject::invokeMethod(
@@ -551,9 +551,6 @@ MainWindow::MainWindow(bool has_broken_vulkan)
     UpdateWindowTitle();
 
     show();
-
-    // v5.9: the shader cache v5.8's import left in eden/lichii, before a game boots.
-    UserDataMigrator::CatchUpShaderCache(this);
 
 #ifdef ENABLE_UPDATE_CHECKER
     connect(&update_watcher, &QFutureWatcher<UpdateChecker::CheckResult>::finished, this,
