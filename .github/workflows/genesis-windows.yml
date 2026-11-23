@@ -30,6 +30,7 @@ jobs:
     env:
       SCCACHE_DIR: ${{ github.workspace }}/.sccache
       SCCACHE_CACHE_SIZE: 3G
+      FRITCHII_SHADER_STAMP_ANY: "1"
 
     steps:
       - name: Check out source
