@@ -109,7 +109,7 @@ inline bool ShouldSkipAutoDetectDir(std::string_view name_lower) {
     if (name_lower.empty() || name_lower.front() == '.' || name_lower.front() == '$') {
         return true;
     }
-    static constexpr std::array<std::string_view, 54> skip_dirs = {
+    static constexpr std::array<std::string_view, 62> skip_dirs = {
         "windows",
         "windows.old",
         "system volume information",
@@ -157,6 +157,14 @@ inline bool ShouldSkipAutoDetectDir(std::string_view name_lower) {
         "keys + firmware",
         "firmware",
         "keys",
+        "src",
+        "tests",
+        "test",
+        "fixtures",
+        "nx_fixtures",
+        "externals",
+        "build",
+        "dist",
         "proc",
         "sys",
         "dev",
@@ -419,6 +427,10 @@ std::vector<std::filesystem::path> AutoDetectRoots(const std::vector<SearchRoot>
             }
 
             std::error_code ec;
+            // Never descend into source code repositories (e.g. unit-test fixture .nx files).
+            if (depth > 0 && fs::exists(dir / ".git", ec)) {
+                continue;
+            }
             bool dir_has_game = false;
             for (fs::directory_iterator it{dir, fs::directory_options::skip_permission_denied, ec};
                  !ec && it != fs::directory_iterator{} && !stopped(); it.increment(ec)) {
