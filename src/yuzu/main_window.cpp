@@ -2580,13 +2580,50 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
     }
 
     Settings::SetSwitch1Session(Settings::IsSwitch1ProgramId(title_id));
-    if (Settings::ApplySwitch1StabilityPreset(Settings::values, title_id)) {
-        QtCommon::system->ApplySettings();
-        Settings::UpdateGPUAccuracy();
-        LOG_INFO(Config,
-                 "Applied automatic Switch 1 stability profile for {:016X} "
-                 "(GPL off, Occlusion speed-up off, Reactive flushing on)",
-                 title_id);
+    {
+        Settings::HardwareDisplayProfile hw{};
+        std::string gpu_name = "Unknown GPU";
+        if (!vk_device_records.empty()) {
+            const size_t card = VkDeviceInfo::PickedIndex(
+                vk_device_records, Settings::values.vulkan_device.GetValue(),
+                Settings::values.vulkan_device_name.GetValue());
+            if (card < vk_device_records.size()) {
+                const auto& rec = vk_device_records[card];
+                gpu_name = rec.device_name.empty() ? rec.name : rec.device_name;
+                hw.discrete_gpu = rec.device_type == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+                hw.vram_bytes = rec.local_memory;
+                hw.supports_mailbox =
+                    std::find(rec.vsync_support.begin(), rec.vsync_support.end(),
+                              VK_PRESENT_MODE_MAILBOX_KHR) != rec.vsync_support.end();
+            }
+        }
+        QScreen* active_screen = this->screen();
+        if (active_screen == nullptr) {
+            active_screen = QGuiApplication::primaryScreen();
+        }
+        if (active_screen != nullptr) {
+            const qreal dpr = active_screen->devicePixelRatio();
+            hw.display_width = qRound(active_screen->size().width() * dpr);
+            hw.display_height = qRound(active_screen->size().height() * dpr);
+        }
+        const bool hw_applied =
+            Settings::ApplyAutoHardwareQualityPreset(Settings::values, title_id, hw);
+        const bool sw1_applied = Settings::ApplySwitch1StabilityPreset(Settings::values, title_id);
+        if (hw_applied || sw1_applied) {
+            Settings::UpdateRescalingInfo();
+            Settings::UpdateGPUAccuracy();
+            QtCommon::system->ApplySettings();
+            LOG_INFO(Config,
+                     "Applied automatic {} hardware/display profile for {:016X}: GPU=\"{}\" "
+                     "({} MiB, discrete={}), display={}x{}, res={}, AF={}, ASTC={}, VRAM={}",
+                     Settings::IsSwitch1ProgramId(title_id) ? "Switch 1" : "Switch 2", title_id,
+                     gpu_name, hw.vram_bytes / (1024ULL * 1024ULL), hw.discrete_gpu,
+                     hw.display_width, hw.display_height,
+                     Settings::values.resolution_setup.ToString(),
+                     Settings::values.max_anisotropy.ToString(),
+                     Settings::values.astc_recompression.ToString(),
+                     Settings::values.vram_usage_mode.ToString());
+        }
     }
 
     if (title_id == Settings::MarioKartWorldProgramId && !asked_recommended_mkw_settings) {

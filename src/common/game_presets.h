@@ -24,6 +24,98 @@ inline void SetSwitch1Session(bool is_switch1) {
     return g_switch1_session.load(std::memory_order_relaxed);
 }
 
+struct HardwareDisplayProfile {
+    bool discrete_gpu = false;
+    bool supports_mailbox = false;
+    u64 vram_bytes = 0;
+    int display_width = 1920;
+    int display_height = 1080;
+};
+
+[[nodiscard]] inline constexpr ResolutionSetup PickAutoResolution(const HardwareDisplayProfile& hw,
+                                                                  bool is_switch1) {
+    constexpr u64 GiB = 1024ULL * 1024ULL * 1024ULL;
+    const bool high_end = hw.discrete_gpu && hw.vram_bytes >= 10ULL * GiB;
+    const bool ultra_vram = hw.discrete_gpu && hw.vram_bytes >= 12ULL * GiB;
+    const bool mid_range = hw.discrete_gpu && hw.vram_bytes >= 6ULL * GiB;
+
+    if (is_switch1) {
+        if (high_end) {
+            if (hw.display_height >= 1440) {
+                return ResolutionSetup::Res2X;
+            }
+            if (hw.display_height >= 1080) {
+                return ResolutionSetup::Res3_2X;
+            }
+            return ResolutionSetup::Res1X;
+        }
+        if (mid_range && hw.display_height >= 1440) {
+            return ResolutionSetup::Res3_2X;
+        }
+        return ResolutionSetup::Res1X;
+    }
+
+    // Switch 2 titles are heavier internally; scale up only on 12+ GiB discrete GPUs.
+    if (ultra_vram) {
+        if (hw.display_height >= 2160) {
+            return ResolutionSetup::Res2X;
+        }
+        if (hw.display_height >= 1440) {
+            return ResolutionSetup::Res3_2X;
+        }
+    }
+    return ResolutionSetup::Res1X;
+}
+
+/// Automatically detects GPU tier and physical display resolution to configure optimal
+/// resolution, texture filtering, VRAM budget, and latency settings for the session
+/// without altering saved global settings or overriding explicit per-game overrides.
+inline bool ApplyAutoHardwareQualityPreset(Values& settings, u64 program_id,
+                                           const HardwareDisplayProfile& hw) {
+    if (program_id == 0) {
+        return false;
+    }
+    constexpr u64 GiB = 1024ULL * 1024ULL * 1024ULL;
+    const bool is_switch1 = IsSwitch1ProgramId(program_id);
+    const bool high_end = hw.discrete_gpu && hw.vram_bytes >= 10ULL * GiB;
+    const bool ultra_vram = hw.discrete_gpu && hw.vram_bytes >= 12ULL * GiB;
+    const bool mid_range = hw.discrete_gpu && hw.vram_bytes >= 6ULL * GiB;
+
+    const auto session_if_global = [](auto& setting, auto value) {
+        if (!setting.UsingGlobal()) {
+            return;
+        }
+        setting.SetGlobal(false);
+        setting.SetValue(value);
+    };
+
+    session_if_global(settings.resolution_setup, PickAutoResolution(hw, is_switch1));
+    session_if_global(settings.use_asynchronous_shaders, true);
+    session_if_global(settings.async_presentation, true);
+    session_if_global(settings.use_disk_shader_cache, true);
+    session_if_global(settings.use_vulkan_driver_pipeline_cache, true);
+    session_if_global(settings.vsync_mode,
+                      hw.supports_mailbox ? VSyncMode::Mailbox : VSyncMode::Fifo);
+
+    if (high_end) {
+        session_if_global(settings.max_anisotropy, AnisotropyMode::X16);
+        session_if_global(settings.vram_usage_mode, VramUsageMode::Aggressive);
+        session_if_global(settings.accelerate_astc, AstcDecodeMode::Gpu);
+        session_if_global(settings.astc_recompression,
+                          ultra_vram ? AstcRecompression::Uncompressed : AstcRecompression::Bc3);
+        session_if_global(settings.scaling_filter, ScalingFilter::Fsr);
+        if (is_switch1) {
+            session_if_global(settings.anti_aliasing, AntiAliasing::Smaa);
+        }
+    } else if (mid_range) {
+        session_if_global(settings.max_anisotropy, AnisotropyMode::X8);
+        session_if_global(settings.accelerate_astc, AstcDecodeMode::Gpu);
+        session_if_global(settings.scaling_filter, ScalingFilter::Fsr);
+    }
+
+    return true;
+}
+
 /// Automatic console-style stability profile for Nintendo Switch 1 games.
 /// Disables experimental Switch 2 / OoT graphics paths (such as Graphics Pipeline Library
 /// independent descriptor sets and Low GPU accuracy) for the session without modifying saved
