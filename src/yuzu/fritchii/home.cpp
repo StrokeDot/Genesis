@@ -99,8 +99,15 @@ AddOnSummary ParseAddOns(const QString& raw) {
             int count = 1;
             if (!detail.isEmpty()) {
                 const QStringList parts = detail.split(QLatin1Char(','), Qt::SkipEmptyParts);
-                if (!parts.isEmpty()) {
-                    count = static_cast<int>(parts.size());
+                std::set<QString> unique_ids;
+                for (const QString& part : parts) {
+                    const QString trimmed = part.trimmed();
+                    if (!trimmed.isEmpty()) {
+                        unique_ids.insert(trimmed);
+                    }
+                }
+                if (!unique_ids.empty()) {
+                    count = static_cast<int>(unique_ids.size());
                 }
             }
             if (enabled) {
@@ -659,10 +666,12 @@ void Home::ShowHeroAddonsDialog() {
     tid_label->setStyleSheet(QStringLiteral("font-size: 11px; color: #9a9aa8;"));
     root->addWidget(tid_label);
 
-    // Overall health banner
+    // Overall health banner: an older update disabled alongside an active update is normal.
     auto* banner = new QLabel(&dialog);
     banner->setWordWrap(true);
-    const bool has_disabled = summary.HasDisabledUpdate() || summary.disabled_dlc_count > 0;
+    const bool has_disabled =
+        (!summary.HasEnabledUpdate() && summary.HasDisabledUpdate()) ||
+        (summary.enabled_dlc_count == 0 && summary.disabled_dlc_count > 0);
     if (has_disabled) {
         banner->setText(tr("! Some installed Updates or DLC are currently disabled. Click \"Manage Add-Ons...\" below to enable them."));
         banner->setStyleSheet(QStringLiteral(
@@ -777,7 +786,8 @@ void Home::ShowLibraryAddonsDialog() {
             ++updated_count;
         }
         total_dlc += s.enabled_dlc_count;
-        if (s.HasDisabledUpdate() || s.disabled_dlc_count > 0) {
+        if ((!s.HasEnabledUpdate() && s.HasDisabledUpdate()) ||
+            (s.enabled_dlc_count == 0 && s.disabled_dlc_count > 0)) {
             ++disabled_issues;
         }
     }
@@ -877,7 +887,8 @@ void Home::ShowLibraryAddonsDialog() {
         }
 
         QTableWidgetItem* status_item = nullptr;
-        if (s.HasDisabledUpdate() || s.disabled_dlc_count > 0) {
+        if ((!s.HasEnabledUpdate() && s.HasDisabledUpdate()) ||
+            (s.enabled_dlc_count == 0 && s.disabled_dlc_count > 0)) {
             status_item = new QTableWidgetItem(tr("! Check Add-Ons"));
             status_item->setForeground(QColor(QStringLiteral("#fcd34d")));
         } else if (s.HasEnabledUpdate() || s.enabled_dlc_count > 0) {
