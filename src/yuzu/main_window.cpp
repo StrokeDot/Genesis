@@ -675,9 +675,12 @@ MainWindow::MainWindow(bool has_broken_vulkan)
 
         auto const lp = Core::ParseLaunchParams(*QtCommon::system, args_cstr.size(), args_cstr.data(), nullptr);
 
-        // Override fullscreen setting if gamepath or argument is provided
-        if (!lp.filepath.empty() || lp.fullscreen) {
-            ui->action_Fullscreen->setChecked(lp.fullscreen);
+        // Respect explicit -f or the "Launch games in fullscreen" console setting.
+        if (lp.fullscreen ||
+            (!lp.filepath.empty() && UISettings::values.launch_games_in_fullscreen.GetValue())) {
+            ui->action_Fullscreen->setChecked(true);
+        } else if (!lp.filepath.empty()) {
+            ui->action_Fullscreen->setChecked(false);
         }
 
         if (!lp.filepath.empty()) {
@@ -2828,6 +2831,9 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
     loading_screen->show();
 
     emulation_running = true;
+    if (UISettings::values.launch_games_in_fullscreen.GetValue()) {
+        ui->action_Fullscreen->setChecked(true);
+    }
     if (ui->action_Fullscreen->isChecked()) {
         ShowFullscreen();
     } else {
@@ -3954,11 +3960,9 @@ void MainWindow::OnControllerExitGame() {
     if (!emulation_running || QtCommon::system->IsShuttingDown()) {
         return;
     }
-    LOG_INFO(Frontend, "Controller exit shortcut triggered (launched_with_game={})",
-             launched_with_game);
-    if (launched_with_game) {
-        close_pending = true;
-    }
+    LOG_INFO(Frontend, "Controller exit shortcut triggered: stopping current game (staying in Genesis)");
+    // Close only the running game and return cleanly to Genesis Home.
+    launched_with_game = false;
     play_time_manager->Stop();
     if (OnShutdownBegin()) {
         OnShutdownBeginDialog();

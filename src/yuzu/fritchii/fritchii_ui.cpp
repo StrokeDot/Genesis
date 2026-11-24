@@ -43,6 +43,7 @@
 #include "common/settings.h"
 #include "core/core.h"
 #include "qt_common/config/shared_translation.h"
+#include "qt_common/config/uisettings.h"
 #include "qt_common/qt_common.h"
 #include "ui_main.h"
 #ifdef HAS_RESHADE
@@ -225,7 +226,31 @@ void RestructureMenus(Ui::MainWindow& ui, QMainWindow& window, const MenuHooks& 
     view->addAction(ui.action_Single_Window_Mode);
     view->addSeparator();
     view->addAction(ui.action_Show_Performance_Overlay);
-    view->addAction(ui.action_Show_Frame_Times);
+    QMenu* overlay_style = view->addMenu(tr("FPS Overlay &Layout"));
+    auto* style_simple = overlay_style->addAction(tr("Simple FPS (Number Only)"));
+    style_simple->setCheckable(true);
+    auto* style_study = overlay_style->addAction(tr("Dip Study (Lows & Dip Graph)"));
+    style_study->setCheckable(true);
+    QObject::connect(overlay_style, &QMenu::aboutToShow, overlay_style, [style_simple, style_study] {
+        const auto cur = static_cast<UISettings::PerfOverlayLayout>(
+            UISettings::values.perf_overlay_layout.GetValue());
+        style_simple->setChecked(cur == UISettings::PerfOverlayLayout::SimpleFps);
+        style_study->setChecked(cur == UISettings::PerfOverlayLayout::DipStudy);
+    });
+    QObject::connect(style_simple, &QAction::triggered, &window, [&ui] {
+        UISettings::values.perf_overlay_layout.SetValue(
+            static_cast<u8>(UISettings::PerfOverlayLayout::SimpleFps));
+        if (!ui.action_Show_Performance_Overlay->isChecked()) {
+            ui.action_Show_Performance_Overlay->trigger();
+        }
+    });
+    QObject::connect(style_study, &QAction::triggered, &window, [&ui] {
+        UISettings::values.perf_overlay_layout.SetValue(
+            static_cast<u8>(UISettings::PerfOverlayLayout::DipStudy));
+        if (!ui.action_Show_Performance_Overlay->isChecked()) {
+            ui.action_Show_Performance_Overlay->trigger();
+        }
+    });
     view->addAction(ui.action_Show_Status_Bar);
     view->addAction(ui.action_Show_Filter_Bar);
     view->addSeparator();
@@ -308,7 +333,7 @@ void RestructureMenus(Ui::MainWindow& ui, QMainWindow& window, const MenuHooks& 
     Rename(ui.action_Grid_View, tr("&Grid"));
     Rename(ui.action_Carousel_View, tr("&Carousel"));
     Rename(ui.action_Show_Game_Name, tr("Show Game &Names"));
-    Rename(ui.action_Show_Performance_Overlay, tr("&Performance Overlay"));
+    Rename(ui.action_Show_Performance_Overlay, tr("&FPS Overlay"));
     Rename(ui.action_Show_Frame_Times, tr("Overlay &Frame Times"));
     Rename(ui.action_Show_Status_Bar, tr("&Status Bar"));
     Rename(ui.action_Show_Filter_Bar, tr("Search &Bar"));

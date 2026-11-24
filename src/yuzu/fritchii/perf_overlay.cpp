@@ -6,106 +6,56 @@
 #include <cmath>
 #include <limits>
 
+#include <QAction>
 #include <QFont>
 #include <QFontMetrics>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 
-#include "common/frame_budget.h"
 #include "common/settings.h"
 #include "core/perf_stats.h"
-#include "qt_common/config/uisettings.h"
 #include "yuzu/main_window.h"
-
-#ifdef _WIN32
-#include <windows.h>
-#include <dxgi1_4.h>
-#include <psapi.h>
-#endif
 
 namespace FritchiiUi {
 namespace {
 
-constexpr size_t MaxSamples = 90;
-// A sample this low is a freeze, a loading screen or the boot: a gap in the line, not a dip.
-constexpr double GapFps = 10.0;
-// "low" is the lowest of the most recent samples (about half a minute).
-constexpr size_t LowSamples = 30;
-constexpr int Width = 272;
-constexpr int Height = 210;
-constexpr int RamRowTop = 66;
-constexpr int VramRowTop = RamRowTop + 26;
-// View > Frame Times: four rows under VRAM, the line moves down.
-constexpr int TimesRowTop = VramRowTop + 26;
-constexpr int TimesRows = 4;
-constexpr int TimesHeight = TimesRows * 26;
-constexpr int Pad = 18;
-constexpr int GraphHeight = 54;
+constexpr size_t MaxSamples = 120; // ~60s of samples at 500ms tick
+constexpr double GapFps = 8.0;     // Below this is a loading screen / menu pause gap
 
-const QColor Panel{0x16, 0x16, 0x1a, 232};
-const QColor Edge{255, 255, 255, 22};
-const QColor Text{0xec, 0xec, 0xf1};
-const QColor Muted{0x9a, 0x9a, 0xa8};
-const QColor Accent{0xa7, 0x8b, 0xfa};
-const QColor Guide{255, 255, 255, 34};
+// Simple FPS pill: whisper-small, number only
+constexpr int SimpleWidth = 60;
+constexpr int SimpleHeight = 32;
 
-#ifdef _WIN32
-/// Fritchii's video memory: DXGI's per-process usage and budget on the adapter where Fritchii's
-/// usage shows up (the GPU it renders on). dxgi.dll is loaded at run time. False when unknown.
-bool QueryVideoMemory(double& used_gb, double& left_gb) {
-    using CreateFactory = HRESULT(WINAPI*)(REFIID, void**);
-    static const CreateFactory create = [] {
-        const HMODULE dxgi = LoadLibraryW(L"dxgi.dll");
-        return dxgi ? reinterpret_cast<CreateFactory>(GetProcAddress(dxgi, "CreateDXGIFactory1"))
-                    : nullptr;
-    }();
-    if (create == nullptr) {
-        return false;
-    }
-    // Kept for the session: the overlay asks about once a second.
-    static IDXGIFactory1* const factory = [] {
-        IDXGIFactory1* created = nullptr;
-        return SUCCEEDED(create(__uuidof(IDXGIFactory1), reinterpret_cast<void**>(&created)))
-                   ? created
-                   : nullptr;
-    }();
-    if (factory == nullptr) {
-        return false;
-    }
-    UINT64 best_usage = 0;
-    UINT64 best_budget = 0;
-    IDXGIAdapter1* adapter = nullptr;
-    for (UINT index = 0; factory->EnumAdapters1(index, &adapter) != DXGI_ERROR_NOT_FOUND; ++index) {
-        IDXGIAdapter3* adapter3 = nullptr;
-        if (SUCCEEDED(adapter->QueryInterface(__uuidof(IDXGIAdapter3),
-                                              reinterpret_cast<void**>(&adapter3)))) {
-            DXGI_QUERY_VIDEO_MEMORY_INFO info{};
-            if (SUCCEEDED(adapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL,
-                                                         &info)) &&
-                info.CurrentUsage > best_usage) {
-                best_usage = info.CurrentUsage;
-                best_budget = info.Budget;
-            }
-            adapter3->Release();
-        }
-        adapter->Release();
-    }
-    if (best_usage == 0) {
-        return false;
-    }
-    constexpr double GiB = 1024.0 * 1024.0 * 1024.0;
-    used_gb = static_cast<double>(best_usage) / GiB;
-    left_gb = best_budget > best_usage ? static_cast<double>(best_budget - best_usage) / GiB : 0.0;
-    return true;
-}
-#endif
+// Dip Study card: compact, focused on seeing and studying dips
+constexpr int StudyWidth = 248;
+constexpr int StudyHeight = 128;
+
+const QColor PanelBg{0x12, 0x12, 0x17, 210};
+const QColor PanelEdge{255, 255, 255, 28};
+const QColor TextMain{0xf2, 0xf2, 0xf6};
+const QColor TextMuted{0x9a, 0x9a, 0xaa};
+const QColor ColorSmooth{0x6e, 0xe7, 0xb7}; // Emerald-mint when smooth
+const QColor ColorMildDip{0xfb, 0xbf, 0x24}; // Amber on mild dip (<92% target)
+const QColor ColorHeavyDip{0xf8, 0x71, 0x71}; // Coral-red on heavy dip (<75% target)
+const QColor GuideLine{255, 255, 255, 42};
 
 QFont InterFont(int pixel_size, QFont::Weight weight) {
     QFont font(QStringLiteral("Inter"));
     font.setPixelSize(pixel_size);
     font.setWeight(weight);
     return font;
+}
+
+QColor ColorForFps(double sample, double target) {
+    if (sample >= target * 0.92) {
+        return ColorSmooth;
+    }
+    if (sample >= target * 0.75) {
+        return ColorMildDip;
+    }
+    return ColorHeavyDip;
 }
 
 } // namespace
@@ -116,8 +66,9 @@ PerfOverlay::PerfOverlay(MainWindow* main_window_, std::function<void()> on_hidd
       main_window{main_window_}, on_hidden{std::move(on_hidden_)} {
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_ShowWithoutActivating);
-    ApplyTimes();
+    ApplyLayout();
     setCursor(Qt::OpenHandCursor);
+    setToolTip(tr("Drag to move. Double-click to switch Simple FPS / Dip Study. Right-click for menu."));
     FollowWindow();
     connect(main_window, &MainWindow::positionChanged, this, &PerfOverlay::FollowWindow);
     connect(main_window, &MainWindow::statsUpdated, this,
@@ -126,38 +77,36 @@ PerfOverlay::PerfOverlay(MainWindow* main_window_, std::function<void()> on_hidd
             });
 }
 
-PerfOverlay::~PerfOverlay() {
-    Common::FrameBudget::SetWanted(false);
-}
+PerfOverlay::~PerfOverlay() = default;
 
 void PerfOverlay::FollowWindow() {
     move(main_window->pos() + offset);
 }
 
-void PerfOverlay::ApplyTimes() {
-    times_on = UISettings::values.perf_overlay_times.GetValue();
-    setFixedSize(Width, Height + (times_on ? TimesHeight : 0));
-    times = {};
-    Common::FrameBudget::Reset();
-    Common::FrameBudget::SetWanted(times_on && isVisible());
+void PerfOverlay::ApplyLayout() {
+    const auto configured = static_cast<UISettings::PerfOverlayLayout>(
+        UISettings::values.perf_overlay_layout.GetValue());
+    layout = (configured == UISettings::PerfOverlayLayout::DipStudy)
+                 ? UISettings::PerfOverlayLayout::DipStudy
+                 : UISettings::PerfOverlayLayout::SimpleFps;
+    if (layout == UISettings::PerfOverlayLayout::SimpleFps) {
+        setFixedSize(SimpleWidth, SimpleHeight);
+    } else {
+        setFixedSize(StudyWidth, StudyHeight);
+    }
+    update();
 }
 
-void PerfOverlay::showEvent(QShowEvent* event) {
-    QWidget::showEvent(event);
-    Common::FrameBudget::Reset();
-    Common::FrameBudget::SetWanted(times_on);
-}
-
-void PerfOverlay::hideEvent(QHideEvent* event) {
-    QWidget::hideEvent(event);
-    Common::FrameBudget::SetWanted(false);
+void PerfOverlay::SetLayout(UISettings::PerfOverlayLayout next_layout) {
+    UISettings::values.perf_overlay_layout.SetValue(static_cast<u8>(next_layout));
+    ApplyLayout();
 }
 
 void PerfOverlay::OnStats(const Core::PerfStatsResults& results) {
-    if (UISettings::values.perf_overlay_times.GetValue() != times_on) {
-        ApplyTimes();
-    } else if (times_on && isVisible()) {
-        times = FrameBudgetView::Make(Common::FrameBudget::Take(), results.average_game_fps);
+    const auto configured = static_cast<UISettings::PerfOverlayLayout>(
+        UISettings::values.perf_overlay_layout.GetValue());
+    if (configured != layout) {
+        ApplyLayout();
     }
     if (!std::isnan(results.average_game_fps)) {
         fps = results.average_game_fps;
@@ -169,206 +118,204 @@ void PerfOverlay::OnStats(const Core::PerfStatsResults& results) {
     if (!std::isnan(results.frametime)) {
         frametime_ms = results.frametime * 1000.0;
     }
-#ifdef _WIN32
-    constexpr double GiB = 1024.0 * 1024.0 * 1024.0;
-    PROCESS_MEMORY_COUNTERS counters{};
-    if (GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters))) {
-        ram_used_gb = static_cast<double>(counters.WorkingSetSize) / GiB;
-    }
-    MEMORYSTATUSEX status{};
-    status.dwLength = sizeof(status);
-    if (GlobalMemoryStatusEx(&status)) {
-        ram_free_gb = static_cast<double>(status.ullAvailPhys) / GiB;
-    }
-    if (!QueryVideoMemory(vram_used_gb, vram_left_gb)) {
-        vram_used_gb = -1;
-        vram_left_gb = -1;
-    }
-#endif
     update();
 }
 
 void PerfOverlay::paintEvent(QPaintEvent*) {
     QPainter painter(this);
-    painter.setRenderHint(QPainter::Antialiasing);
-    painter.setPen(Edge);
-    painter.setBrush(Panel);
-    painter.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 16, 16);
+    painter.setRenderHint(QPainter::Antialiasing, true);
 
-    // The frame rate, big, and "fps" beside it.
-    const QFont big = InterFont(40, QFont::Medium);
-    const QFont label = InterFont(15, QFont::Normal);
-    const QString fps_text = QString::number(std::lround(fps));
-    const int baseline = Pad + QFontMetrics(big).ascent() - 6;
-    painter.setFont(big);
-    painter.setPen(Text);
-    painter.drawText(Pad, baseline, fps_text);
-    const int fps_width = QFontMetrics(big).horizontalAdvance(fps_text);
-    painter.setFont(label);
-    painter.setPen(Muted);
-    painter.drawText(Pad + fps_width + 8, baseline, tr("fps"));
-
-    // Frame time and the lowest recent frame rate, right-aligned.
-    double low = std::numeric_limits<double>::infinity();
-    const size_t first = fps_samples.size() > LowSamples ? fps_samples.size() - LowSamples : 0;
-    for (size_t i = first; i < fps_samples.size(); ++i) {
-        if (!std::isnan(fps_samples[i])) {
-            low = std::min(low, fps_samples[i]);
-        }
-    }
-    const QFont value = InterFont(17, QFont::Medium);
-    const QString frametime_text = tr("%1 ms").arg(frametime_ms, 0, 'f', 1);
-    const QString low_text =
-        std::isinf(low) ? QString{} : tr("low %1").arg(std::lround(low));
-    const int right = Width - Pad;
-    painter.setFont(value);
-    painter.setPen(Text);
-    painter.drawText(QRect(right - 140, Pad, 140, 24), Qt::AlignRight | Qt::AlignVCenter,
-                     frametime_text);
-    painter.setFont(label);
-    painter.setPen(Muted);
-    painter.drawText(QRect(right - 140, Pad + 26, 140, 20), Qt::AlignRight | Qt::AlignVCenter,
-                     low_text);
-
-    // RAM and VRAM: Fritchii's, then what is left. Amber when nearly out: RAM then pages, VRAM
-    // spills into RAM, both show as stutter.
-    const auto memory_row = [&](int top, double used, const QString& name, double left,
-                                double warn_below) {
-        if (used < 0) {
-            return;
-        }
-        const QString used_text = tr("%1 GB").arg(used, 0, 'f', 1);
-        painter.setFont(value);
-        painter.setPen(Text);
-        painter.drawText(QRect(Pad, top, 120, 22), Qt::AlignLeft | Qt::AlignVCenter, used_text);
-        const int used_width = QFontMetrics(value).horizontalAdvance(used_text);
-        painter.setFont(label);
-        painter.setPen(Muted);
-        painter.drawText(QRect(Pad + used_width + 6, top, 60, 22),
-                         Qt::AlignLeft | Qt::AlignVCenter, name);
-        if (left >= 0) {
-            const QColor Warn{0xf5, 0xb0, 0x4b};
-            painter.setPen(left < warn_below ? Warn : Muted);
-            painter.drawText(QRect(right - 140, top, 140, 22), Qt::AlignRight | Qt::AlignVCenter,
-                             tr("%1 GB free").arg(left, 0, 'f', 1));
-        }
-    };
-    memory_row(RamRowTop, ram_used_gb, tr("RAM"), ram_free_gb, 2.0);
-    memory_row(VramRowTop, vram_used_gb, tr("VRAM"), vram_left_gb, 1.0);
-
-    // Frame Times: a value, then its name, like the memory rows; two to a row below the CPU.
-    if (times_on) {
-        using FrameBudgetView::Ms;
-        using FrameBudgetView::Percent;
-        using Common::FrameBudget::Group;
-        const auto item = [&](int left, int top, const QString& number, const QString& name) {
-            painter.setFont(value);
-            painter.setPen(Text);
-            painter.drawText(QRect(left, top, 120, 22), Qt::AlignLeft | Qt::AlignVCenter, number);
-            const int number_width = QFontMetrics(value).horizontalAdvance(number);
-            painter.setFont(label);
-            painter.setPen(Muted);
-            painter.drawText(QRect(left + number_width + 6, top, 80, 22),
-                             Qt::AlignLeft | Qt::AlignVCenter, name);
-        };
-        const auto right_text = [&](int top, const QString& text, const QColor& color) {
-            painter.setFont(label);
-            painter.setPen(color);
-            painter.drawText(QRect(right - 160, top, 160, 22), Qt::AlignRight | Qt::AlignVCenter,
-                             text);
-        };
-        const auto ms_of = [&](Group group) { return times.ms[static_cast<size_t>(group)]; };
-        int top = TimesRowTop;
-        item(Pad, top,
-             times.gpu_unsupported ? tr("n/a") : tr("%1 ms").arg(Ms(times.gpu_ms)), tr("GPU"));
-        if (!times.gpu_unsupported) {
-            right_text(top, tr("%1 busy").arg(Percent(times.gpu_share)), Muted);
-        }
-        top += 26;
-        item(Pad, top, Percent(times.cpu_share), tr("CPU"));
-        const bool capped = times.limit == FrameBudgetView::Limit::Capped;
-        right_text(top, FrameBudgetView::LimitText(times.limit), capped ? Muted : Accent);
-        top += 26;
-        const int column = Width / 2 + 4;
-        item(Pad, top, Ms(ms_of(Group::Front)), tr("Front"));
-        item(column, top, Ms(ms_of(Group::Back)), tr("Back"));
-        top += 26;
-        item(Pad, top, Ms(ms_of(Group::Game)), tr("Game"));
-        if (ms_of(Group::Render) >= 0) {
-            item(column, top, Ms(ms_of(Group::Render)), tr("Render"));
-        }
-    }
-
-    // The line: the last samples against the target frame rate.
-    const QRectF graph(Pad, height() - Pad - GraphHeight, Width - 2 * Pad, GraphHeight);
     const double target = Settings::values.oot_30fps.GetValue() ? 30.0 : 60.0;
-    double top = target * 1.25;
-    for (const double sample : fps_samples) {
-        if (!std::isnan(sample)) {
-            top = std::max(top, sample * 1.1);
+
+    if (layout == UISettings::PerfOverlayLayout::SimpleFps) {
+        // Ultra-clean pill showing ONLY the FPS number.
+        painter.setPen(QPen(PanelEdge, 1.0));
+        painter.setBrush(PanelBg);
+        painter.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 10.0, 10.0);
+
+        painter.setFont(InterFont(17, QFont::Bold));
+        painter.setPen(fps > GapFps ? ColorForFps(fps, target) : TextMain);
+        painter.drawText(rect(), Qt::AlignCenter, QString::number(std::lround(fps)));
+        return;
+    }
+
+    // Dip Study layout: compact telemetry strip + color-coded dip graph
+    painter.setPen(QPen(PanelEdge, 1.0));
+    painter.setBrush(PanelBg);
+    painter.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 12.0, 12.0);
+
+    constexpr int pad = 12;
+
+    // Compute recent dip statistics across the visible window
+    double lowest_fps = std::numeric_limits<double>::infinity();
+    size_t lowest_idx = 0;
+    int dip_count = 0;
+    for (size_t i = 0; i < fps_samples.size(); ++i) {
+        const double s = fps_samples[i];
+        if (std::isnan(s)) {
+            continue;
+        }
+        if (s < lowest_fps) {
+            lowest_fps = s;
+            lowest_idx = i;
+        }
+        if (s < target * 0.92) {
+            ++dip_count;
         }
     }
-    const auto y_of = [&](double v) { return graph.bottom() - v / top * graph.height(); };
-    painter.setPen(QPen(Guide, 1, Qt::DashLine));
-    painter.drawLine(QPointF(graph.left(), y_of(target)), QPointF(graph.right(), y_of(target)));
 
+    // Top row: live FPS + frametime (left) | Low + Dips count (right)
+    const QString fps_str = QString::number(std::lround(fps));
+    const QFont big_font = InterFont(24, QFont::Bold);
+    const QFont small_font = InterFont(11, QFont::Medium);
+    const QFont tiny_font = InterFont(10, QFont::Normal);
+
+    painter.setFont(big_font);
+    painter.setPen(fps > GapFps ? ColorForFps(fps, target) : TextMain);
+    painter.drawText(QRect(pad, 6, 54, 28), Qt::AlignLeft | Qt::AlignVCenter, fps_str);
+
+    const int fps_w = QFontMetrics(big_font).horizontalAdvance(fps_str);
+    painter.setFont(small_font);
+    painter.setPen(TextMuted);
+    painter.drawText(QRect(pad + fps_w + 5, 10, 80, 20), Qt::AlignLeft | Qt::AlignVCenter,
+                     tr("FPS  %1ms").arg(frametime_ms, 0, 'f', 1));
+
+    // Right side: Lowest dip & dip counter
+    const bool has_low = !std::isinf(lowest_fps);
+    painter.setFont(small_font);
+    painter.setPen(has_low ? ColorForFps(lowest_fps, target) : TextMuted);
+    const QString low_str =
+        has_low ? tr("Low %1").arg(std::lround(lowest_fps)) : tr("Low --");
+    painter.drawText(QRect(StudyWidth - pad - 95, 7, 95, 16), Qt::AlignRight | Qt::AlignVCenter,
+                     low_str);
+
+    painter.setFont(tiny_font);
+    painter.setPen(dip_count > 0 ? ColorMildDip : TextMuted);
+    painter.drawText(QRect(StudyWidth - pad - 95, 22, 95, 14), Qt::AlignRight | Qt::AlignVCenter,
+                     dip_count == 1 ? tr("1 dip") : tr("%1 dips").arg(dip_count));
+
+    // Dip study graph area
+    const QRectF graph(pad, 42.0, StudyWidth - 2.0 * pad, StudyHeight - 54.0);
+    painter.setPen(QPen(QColor(255, 255, 255, 18), 1.0));
+    painter.setBrush(QColor(0x0b, 0x0b, 0x0f, 165));
+    painter.drawRoundedRect(graph, 6.0, 6.0);
+
+    double top_fps = target * 1.15;
+    for (const double s : fps_samples) {
+        if (!std::isnan(s)) {
+            top_fps = std::max(top_fps, s * 1.08);
+        }
+    }
+    const auto y_of = [&](double v) {
+        const double clamped = std::clamp(v, 0.0, top_fps);
+        return graph.bottom() - 3.0 - (clamped / top_fps) * (graph.height() - 6.0);
+    };
+
+    // Target FPS dashed reference line
+    const qreal target_y = y_of(target);
+    painter.setPen(QPen(GuideLine, 1.0, Qt::DashLine));
+    painter.drawLine(QPointF(graph.left() + 2.0, target_y), QPointF(graph.right() - 2.0, target_y));
+
+    // Dip threshold subtle guide (92% of target)
+    const qreal dip_y = y_of(target * 0.92);
+    painter.setPen(QPen(QColor(0xfb, 0xbf, 0x24, 48), 1.0, Qt::DotLine));
+    painter.drawLine(QPointF(graph.left() + 2.0, dip_y), QPointF(graph.right() - 2.0, dip_y));
+
+    // Tiny target label
+    painter.setFont(InterFont(9, QFont::Medium));
+    painter.setPen(QColor(0x9a, 0x9a, 0xaa, 180));
+    painter.drawText(QRectF(graph.right() - 26.0, target_y - 12.0, 22.0, 12.0),
+                     Qt::AlignRight | Qt::AlignVCenter, QString::number(static_cast<int>(target)));
+
+    // Draw color-coded segments so every dip pops out visually in amber / coral!
     if (fps_samples.size() >= 2) {
-        const double step = graph.width() / static_cast<double>(MaxSamples - 1);
-        const double x0 = graph.right() - step * static_cast<double>(fps_samples.size() - 1);
-        QPainterPath line;
-        QPainterPath fill;
-        bool open = false;
-        double run_start = 0;
-        double last_x = 0;
-        const auto close_fill = [&] {
-            if (open) {
-                fill.lineTo(last_x, graph.bottom());
-                fill.lineTo(run_start, graph.bottom());
-                fill.closeSubpath();
-            }
-        };
-        for (size_t i = 0; i < fps_samples.size(); ++i) {
-            const double sample = fps_samples[i];
-            const double x = x0 + step * static_cast<double>(i);
-            if (std::isnan(sample)) {
-                close_fill();
-                open = false;
+        const double usable_w = graph.width() - 6.0;
+        const double step = usable_w / static_cast<double>(MaxSamples - 1);
+        const double x0 = graph.right() - 3.0 - step * static_cast<double>(fps_samples.size() - 1);
+
+        QPointF lowest_pt;
+        bool has_lowest_pt = false;
+
+        for (size_t i = 1; i < fps_samples.size(); ++i) {
+            const double prev = fps_samples[i - 1];
+            const double curr = fps_samples[i];
+            if (std::isnan(prev) || std::isnan(curr)) {
                 continue;
             }
-            const double y = y_of(std::min(sample, top));
-            if (!open) {
-                line.moveTo(x, y);
-                fill.moveTo(x, y);
-                run_start = x;
-                open = true;
-            } else {
-                line.lineTo(x, y);
-                fill.lineTo(x, y);
+            const QPointF p1(x0 + step * static_cast<double>(i - 1), y_of(prev));
+            const QPointF p2(x0 + step * static_cast<double>(i), y_of(curr));
+            const double seg_min = std::min(prev, curr);
+            const QColor seg_col = ColorForFps(seg_min, target);
+
+            // Subtle translucent fill under dip segments so dips are unmistakable
+            if (seg_min < target * 0.92) {
+                QColor dip_fill = seg_col;
+                dip_fill.setAlpha(44);
+                QPainterPath band;
+                band.moveTo(p1);
+                band.lineTo(p2);
+                band.lineTo(p2.x(), graph.bottom() - 2.0);
+                band.lineTo(p1.x(), graph.bottom() - 2.0);
+                band.closeSubpath();
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(dip_fill);
+                painter.drawPath(band);
             }
-            last_x = x;
+
+            painter.setPen(QPen(seg_col, 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            painter.drawLine(p1, p2);
         }
-        close_fill();
-        QColor area = Accent;
-        area.setAlpha(46);
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(area);
-        painter.drawPath(fill);
-        painter.setBrush(Qt::NoBrush);
-        painter.setPen(QPen(Accent, 2.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        painter.drawPath(line);
+
+        if (has_low && lowest_fps < target * 0.95 && lowest_idx < fps_samples.size()) {
+            lowest_pt = QPointF(x0 + step * static_cast<double>(lowest_idx), y_of(lowest_fps));
+            has_lowest_pt = true;
+        }
+        if (has_lowest_pt) {
+            const QColor marker_col = ColorForFps(lowest_fps, target);
+            painter.setPen(QPen(QColor(0x12, 0x12, 0x17), 1.5));
+            painter.setBrush(marker_col);
+            painter.drawEllipse(lowest_pt, 3.8, 3.8);
+        }
     }
 }
 
 void PerfOverlay::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::RightButton) {
-        hide();
-        if (on_hidden) {
-            on_hidden();
-        }
+        QMenu menu(this);
+        auto* simple_act = menu.addAction(tr("Simple FPS (Number Only)"));
+        simple_act->setCheckable(true);
+        simple_act->setChecked(layout == UISettings::PerfOverlayLayout::SimpleFps);
+        connect(simple_act, &QAction::triggered, this,
+                [this] { SetLayout(UISettings::PerfOverlayLayout::SimpleFps); });
+
+        auto* study_act = menu.addAction(tr("Dip Study (Lows & Dip Graph)"));
+        study_act->setCheckable(true);
+        study_act->setChecked(layout == UISettings::PerfOverlayLayout::DipStudy);
+        connect(study_act, &QAction::triggered, this,
+                [this] { SetLayout(UISettings::PerfOverlayLayout::DipStudy); });
+
+        menu.addSeparator();
+        auto* hide_act = menu.addAction(tr("Hide FPS Overlay"));
+        connect(hide_act, &QAction::triggered, this, [this] {
+            hide();
+            if (on_hidden) {
+                on_hidden();
+            }
+        });
+        menu.exec(event->globalPosition().toPoint());
         return;
     }
     if (event->button() == Qt::LeftButton) {
         drag_start = event->pos();
+    }
+}
+
+void PerfOverlay::mouseDoubleClickEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton) {
+        const auto next = (layout == UISettings::PerfOverlayLayout::SimpleFps)
+                              ? UISettings::PerfOverlayLayout::DipStudy
+                              : UISettings::PerfOverlayLayout::SimpleFps;
+        SetLayout(next);
     }
 }
 

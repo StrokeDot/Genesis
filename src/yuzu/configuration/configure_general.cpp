@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 #include <QBoxLayout>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
 #include <QFileDialog>
@@ -135,13 +136,40 @@ void ConfigureGeneral::Setup(const ConfigurationShared::Builder& builder) {
     }
 
     if (Settings::IsConfiguringGlobal()) {
+        launch_fullscreen_checkbox =
+            new QCheckBox(tr("Launch games in fullscreen automatically"), this);
+        launch_fullscreen_checkbox->setChecked(
+            UISettings::values.launch_games_in_fullscreen.GetValue());
+        general_layout.addWidget(launch_fullscreen_checkbox);
+
+        auto* perf_row_widget = new QWidget(this);
+        auto* perf_row = new QHBoxLayout(perf_row_widget);
+        perf_row->setContentsMargins(0, 4, 0, 4);
+        auto* perf_label = new QLabel(tr("FPS / Performance Overlay Layout"), perf_row_widget);
+        perf_label->setToolTip(
+            tr("Choose between a tiny FPS number counter or a compact Dip-Study graph."));
+        perf_overlay_layout_combo = new QComboBox(perf_row_widget);
+        perf_overlay_layout_combo->addItem(
+            tr("Simple FPS (Number Only)"),
+            static_cast<int>(UISettings::PerfOverlayLayout::SimpleFps));
+        perf_overlay_layout_combo->addItem(
+            tr("Dip Study (FPS, Lows & Dip Graph)"),
+            static_cast<int>(UISettings::PerfOverlayLayout::DipStudy));
+        const int cur_layout =
+            static_cast<int>(UISettings::values.perf_overlay_layout.GetValue());
+        perf_overlay_layout_combo->setCurrentIndex(cur_layout == 1 ? 1 : 0);
+        perf_row->addWidget(perf_label);
+        perf_row->addStretch(1);
+        perf_row->addWidget(perf_overlay_layout_combo);
+        general_layout.addWidget(perf_row_widget);
+
         auto* row_widget = new QWidget(this);
         auto* row = new QHBoxLayout(row_widget);
         row->setContentsMargins(0, 4, 0, 4);
         auto* label = new QLabel(tr("Controller Exit-Game Shortcut"), row_widget);
         label->setToolTip(
-            tr("Press this button or combo on Player 1's Xbox controller to exit a running game "
-               "like a console (returns to GameVault when launched from GameVault, or Genesis Home)."));
+            tr("Press this button or combo on Player 1's controller to close only the running game "
+               "and return cleanly to Genesis Home."));
         controller_exit_combo = new QComboBox(row_widget);
         const auto current_mode = UISettings::values.controller_exit_shortcut.GetValue();
         int selected_index = 0;
@@ -187,6 +215,14 @@ void ConfigureGeneral::ApplyConfiguration() {
     bool powered_on = system.IsPoweredOn();
     for (const auto& func : apply_funcs) {
         func(powered_on);
+    }
+    if (launch_fullscreen_checkbox != nullptr) {
+        UISettings::values.launch_games_in_fullscreen.SetValue(
+            launch_fullscreen_checkbox->isChecked());
+    }
+    if (perf_overlay_layout_combo != nullptr) {
+        UISettings::values.perf_overlay_layout.SetValue(
+            static_cast<u8>(perf_overlay_layout_combo->currentData().toInt()));
     }
     if (controller_exit_combo != nullptr) {
         UISettings::values.controller_exit_shortcut.SetValue(

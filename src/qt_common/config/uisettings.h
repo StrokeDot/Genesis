@@ -95,6 +95,11 @@ enum class ControllerExitShortcut : u8 {
     ClickBothSticks = 5,
 };
 
+enum class PerfOverlayLayout : u8 {
+    SimpleFps = 0,
+    DipStudy = 1,
+};
+
 struct Values {
     Settings::Linkage linkage{1000};
 
@@ -190,6 +195,9 @@ struct Values {
     Setting<u8> controller_exit_shortcut{
         linkage, static_cast<u8>(ControllerExitShortcut::ViewAndMenu), "controller_exit_shortcut",
         Category::Ui};
+    // Automatically enter fullscreen whenever a game boots (leaves fullscreen when game stops).
+    Setting<bool> launch_games_in_fullscreen{linkage, true, "launch_games_in_fullscreen",
+                                             Category::Ui};
 
     // Discord RPC
     Setting<bool> enable_discord_presence{linkage, false, "enable_discord_presence", Category::Ui};
@@ -265,6 +273,9 @@ struct Values {
 
     // perf overlay
     Setting<bool> show_perf_overlay{linkage, false, "show_perf_overlay", Category::UiGameList};
+    // PerfOverlayLayout: 0 = Simple FPS number only, 1 = Detailed Dip Study graph.
+    Setting<u8> perf_overlay_layout{linkage, static_cast<u8>(PerfOverlayLayout::SimpleFps),
+                                    "perf_overlay_layout", Category::UiGameList};
     // View > Frame Times: the overlay's GPU, CPU and thread time rows (common/frame_budget.h).
     Setting<bool> perf_overlay_times{linkage, true, "perf_overlay_times", Category::UiGameList};
 

@@ -16,6 +16,7 @@ namespace Core {
 class System;
 }
 
+class QCheckBox;
 class QComboBox;
 class ConfigureDialog;
 class HotkeyRegistry;
@@ -63,6 +64,8 @@ private:
     std::unique_ptr<Ui::ConfigureGeneral> ui;
 
     std::vector<std::function<void(bool)>> apply_funcs{};
+    QCheckBox* launch_fullscreen_checkbox = nullptr;
+    QComboBox* perf_overlay_layout_combo = nullptr;
     QComboBox* controller_exit_combo = nullptr;
 
     const Core::System& system;
