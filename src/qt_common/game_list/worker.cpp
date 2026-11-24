@@ -434,9 +434,9 @@ std::vector<u8> FetchOnlineSwitchIcon(u64 program_id) {
     }
     try {
         httplib::Client client("https://api.nlib.cc");
-        client.set_connection_timeout(3, 0);
-        client.set_read_timeout(5, 0);
-        client.set_write_timeout(3, 0);
+        client.set_connection_timeout(2, 0);
+        client.set_read_timeout(2, 0);
+        client.set_write_timeout(2, 0);
         client.set_follow_location(true);
 #ifdef YUZU_BUNDLED_OPENSSL
         client.load_ca_cert_store(kCert, sizeof(kCert));
@@ -507,13 +507,27 @@ GameListWorker::GameListWorker(FileSys::VirtualFilesystem vfs_,
 
 GameListWorker::~GameListWorker() {
     this->disconnect();
-    Stop();
+    WaitForStop(std::chrono::milliseconds{250});
+}
+
+void GameListWorker::RequestStop() {
+    stop_requested.store(true, std::memory_order_release);
+}
+
+bool GameListWorker::IsCompleted() const {
+    return completed.load(std::memory_order_acquire);
+}
+
+bool GameListWorker::WaitForStop(std::chrono::milliseconds timeout) {
+    stop_requested.store(true, std::memory_order_release);
+    if (completed.load(std::memory_order_acquire)) {
+        return true;
+    }
+    return processing_completed.WaitFor(timeout);
 }
 
 void GameListWorker::Stop() {
-    if (!stop_requested.exchange(true)) {
-        processing_completed.Wait();
-    }
+    WaitForStop(std::chrono::milliseconds{300});
 }
 
 void GameListWorker::ProcessEvents(GameListModel* model) {
@@ -804,8 +818,11 @@ void GameListWorker::run() {
     const auto parse_uncached_task = [&](const FileScanTask& task,
                                          std::unordered_set<u64>* updated_base_ids,
                                          std::mutex* updated_mutex) {
+        if (stop_requested.load()) {
+            return;
+        }
         const auto file = vfs->OpenFile(task.physical_name, FileSys::OpenMode::Read);
-        if (!file) {
+        if (!file || stop_requested.load()) {
             return;
         }
 
@@ -1285,5 +1302,7 @@ void GameListWorker::run() {
                  std::chrono::steady_clock::now() - started)
                  .count(),
              scan_index.Size(), stop_requested.load());
+    completed.store(true, std::memory_order_release);
     processing_completed.Set();
+    emit Finished();
 }

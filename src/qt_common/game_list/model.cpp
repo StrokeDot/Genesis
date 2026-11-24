@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <QDir>
+#include <QFileInfo>
 #include <QIcon>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -30,11 +31,24 @@ GameListModel::GameListModel(std::shared_ptr<FileSys::VfsFilesystem> vfs_,
       play_time_manager{play_time_manager_}, system{system_} {
     watcher = new QFileSystemWatcher(this);
     external_watcher = new QFileSystemWatcher(this);
+    refresh_debounce_timer = new QTimer(this);
+    refresh_debounce_timer->setSingleShot(true);
+    refresh_debounce_timer->setInterval(350);
 
     connect(watcher, &QFileSystemWatcher::directoryChanged, this,
             &GameListModel::RefreshGameDirectory);
     connect(external_watcher, &QFileSystemWatcher::directoryChanged, this,
             &GameListModel::RefreshExternalContent);
+    connect(refresh_debounce_timer, &QTimer::timeout, this, [this] {
+        if (!scan_enabled || system.IsPoweredOn()) {
+            return;
+        }
+        if (repopulate_reset_metadata) {
+            repopulate_reset_metadata = false;
+            QtCommon::Game::ResetMetadata(false);
+        }
+        Repopulate();
+    });
 
     ResetExternalWatcher();
 
@@ -45,13 +59,35 @@ GameListModel::GameListModel(std::shared_ptr<FileSys::VfsFilesystem> vfs_,
 }
 
 GameListModel::~GameListModel() {
+    if (refresh_debounce_timer) {
+        refresh_debounce_timer->stop();
+    }
+    scan_enabled = false;
+    repopulate_pending = false;
     StopWorker();
+    // Wait briefly for retiring workers; if a background worker is wedged on a sleeping/removed
+    // external drive, release it so process exit never hangs in "(Not Responding)".
+    for (auto& w : retiring_workers) {
+        if (!w) {
+            continue;
+        }
+        w->disconnect();
+        if (!w->WaitForStop(std::chrono::milliseconds{150})) {
+            w.release();
+        }
+    }
+    retiring_workers.clear();
 }
 
 void GameListModel::SetScanEnabled(bool enabled) {
     scan_enabled = enabled;
     if (!enabled) {
+        if (refresh_debounce_timer) {
+            refresh_debounce_timer->stop();
+        }
+        repopulate_pending = false;
         StopWorker();
+        CleanupRetiringWorkers();
     }
 }
 
@@ -59,9 +95,20 @@ void GameListModel::PopulateAsync(QVector<UISettings::GameDir>& game_dirs) {
     if (!scan_enabled || system.IsPoweredOn()) {
         return;
     }
-    emit PopulatingStarted();
 
     StopWorker();
+    CleanupRetiringWorkers();
+
+    // If a previous worker is still unwinding a slow drive read, defer starting the new scan
+    // until it finishes asynchronously instead of freezing the UI thread.
+    if (!retiring_workers.empty()) {
+        repopulate_pending = true;
+        return;
+    }
+
+    repopulate_pending = false;
+    emit PopulatingStarted();
+
     removeRows(0, rowCount());
 
     current_worker = std::make_unique<GameListWorker>(vfs, provider, game_dirs,
@@ -69,6 +116,8 @@ void GameListModel::PopulateAsync(QVector<UISettings::GameDir>& game_dirs) {
 
     connect(current_worker.get(), &GameListWorker::DataAvailable, this, &GameListModel::WorkerEvent,
             Qt::QueuedConnection);
+    connect(current_worker.get(), &GameListWorker::Finished, this,
+            &GameListModel::CleanupRetiringWorkers, Qt::QueuedConnection);
 
     QThreadPool::globalInstance()->start(current_worker.get());
 }
@@ -286,16 +335,118 @@ void GameListModel::RemoveFavorite(u64 program_id) {
     }
 }
 
+void GameListModel::PruneMissingFiles() {
+    const auto is_local_missing = [](const QString& path) {
+        if (path.isEmpty()) {
+            return false;
+        }
+        // Only check real filesystem paths (skip virtual NAND/SDMC placeholders if any).
+        if (!path.contains(QLatin1Char('/')) && !path.contains(QLatin1Char('\\'))) {
+            return false;
+        }
+        return !QFileInfo::exists(path);
+    };
+
+    int removed_count = 0;
+    const auto prune_parent = [&](QStandardItem* parent) {
+        for (int row = parent->rowCount() - 1; row >= 0; --row) {
+            auto* item = parent->child(row, COLUMN_NAME);
+            if (!item || static_cast<GameListItemType>(item->type()) != GameListItemType::Game) {
+                continue;
+            }
+            const QString full_path = item->data(GameListItemPath::FullPathRole).toString();
+            if (is_local_missing(full_path)) {
+                parent->removeRow(row);
+                ++removed_count;
+            }
+        }
+    };
+
+    auto* root = invisibleRootItem();
+    if (m_flat) {
+        prune_parent(root);
+    } else {
+        for (int i = 0; i < root->rowCount(); ++i) {
+            if (auto* folder = root->child(i)) {
+                prune_parent(folder);
+            }
+        }
+    }
+
+    // Also drop any deleted folders from QFileSystemWatcher so Windows doesn't hold stale handles.
+    if (watcher) {
+        QStringList dead_dirs;
+        for (const QString& dir : watcher->directories()) {
+            if (!QFileInfo::exists(dir)) {
+                dead_dirs.append(dir);
+            }
+        }
+        if (!dead_dirs.isEmpty()) {
+            watcher->removePaths(dead_dirs);
+        }
+    }
+
+    if (removed_count > 0) {
+        LOG_INFO(Frontend, "Pruned {} deleted game file(s) from game list immediately.",
+                 removed_count);
+    }
+}
+
+void GameListModel::ScheduleRepopulate(bool reset_metadata) {
+    if (!scan_enabled || system.IsPoweredOn()) {
+        return;
+    }
+    if (reset_metadata) {
+        repopulate_reset_metadata = true;
+    }
+    if (refresh_debounce_timer) {
+        refresh_debounce_timer->start();
+    } else {
+        Repopulate();
+    }
+}
+
+void GameListModel::CleanupRetiringWorkers() {
+    for (auto it = retiring_workers.begin(); it != retiring_workers.end();) {
+        if (!(*it) || (*it)->IsCompleted()) {
+            if (*it) {
+                (*it)->disconnect();
+                (*it).release()->deleteLater();
+            }
+            it = retiring_workers.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    if (retiring_workers.empty() && repopulate_pending && scan_enabled && !system.IsPoweredOn()) {
+        repopulate_pending = false;
+        Repopulate();
+    }
+}
+
 void GameListModel::StopWorker() {
     if (!current_worker) {
         return;
     }
 
-    // The worker may still be inside ProcessEvents further up the stack (a nested event loop
-    // can trigger a repopulate), so stop it now but defer freeing it to the event loop.
-    current_worker->disconnect();
-    current_worker->Stop();
-    current_worker.release()->deleteLater();
+    // Request cancellation asynchronously without blocking the GUI thread.
+    // Keep the worker alive in retiring_workers until its Finished() signal fires.
+    current_worker->disconnect(this);
+    current_worker->RequestStop();
+    if (current_worker->IsCompleted()) {
+        current_worker.release()->deleteLater();
+        return;
+    }
+
+    GameListWorker* retiring = current_worker.get();
+    connect(retiring, &GameListWorker::Finished, this, &GameListModel::CleanupRetiringWorkers,
+            Qt::QueuedConnection);
+    retiring_workers.push_back(std::move(current_worker));
+    // Handle the race where the worker finished right before connect().
+    if (retiring->IsCompleted()) {
+        CleanupRetiringWorkers();
+    }
 }
 
 void GameListModel::Repopulate() {
@@ -307,25 +458,33 @@ void GameListModel::Repopulate() {
     }
 
     StopWorker();
+    CleanupRetiringWorkers();
+    if (!retiring_workers.empty()) {
+        repopulate_pending = true;
+        return;
+    }
+
     QtCommon::system->GetFileSystemController().CreateFactories(*QtCommon::vfs);
     PopulateAsync(UISettings::values.game_dirs);
 }
 
 void GameListModel::RefreshGameDirectory() {
     ResetExternalWatcher();
+    // Immediately remove any deleted files from the UI so Home updates instantaneously without
+    // freezing or crashing, then debounce the background rescan for newly added/changed files.
+    PruneMissingFiles();
     if ((!UISettings::values.game_dirs.empty() || UISettings::values.auto_detect_games.GetValue()) &&
-        current_worker != nullptr) {
-        LOG_INFO(Frontend, "Change detected in the games directory. Reloading game list.");
-        Repopulate();
+        scan_enabled && !system.IsPoweredOn()) {
+        LOG_INFO(Frontend, "Change detected in the games directory. Scheduling non-blocking reload.");
+        ScheduleRepopulate(false);
     }
 }
 
 void GameListModel::RefreshExternalContent() {
     if ((!UISettings::values.game_dirs.empty() || UISettings::values.auto_detect_games.GetValue()) &&
-        current_worker != nullptr) {
-        LOG_INFO(Frontend, "External content directory changed. Clearing metadata cache.");
-        QtCommon::Game::ResetMetadata(false);
-        Repopulate();
+        scan_enabled && !system.IsPoweredOn()) {
+        LOG_INFO(Frontend, "External content directory changed. Scheduling metadata refresh.");
+        ScheduleRepopulate(true);
     }
 }
 

@@ -7,6 +7,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <deque>
 #include <filesystem>
 #include <memory>
@@ -56,7 +57,16 @@ public:
     /// Starts the processing of directory tree information.
     void run() override;
 
-    /// Requests the worker to stop and blocks until processing has finished.
+    /// Requests the worker to stop without blocking the caller.
+    void RequestStop();
+
+    /// Returns true once run() has finished executing.
+    bool IsCompleted() const;
+
+    /// Requests stop and waits up to timeout for run() to finish.
+    bool WaitForStop(std::chrono::milliseconds timeout);
+
+    /// Requests the worker to stop and blocks briefly until processing has finished.
     void Stop();
 
 public:
@@ -71,6 +81,7 @@ public:
 
 signals:
     void DataAvailable();
+    void Finished();
 
 private:
     template <typename F>
@@ -80,7 +91,7 @@ private:
 
     std::shared_ptr<FileSys::VfsFilesystem> vfs;
     FileSys::ManualContentProvider* provider;
-    QVector<UISettings::GameDir>& game_dirs;
+    QVector<UISettings::GameDir> game_dirs;
     const PlayTime::PlayTimeManager& play_time_manager;
 
     QStringList watch_list;
@@ -88,6 +99,7 @@ private:
     std::mutex lock;
     std::deque<std::function<void(GameListModel*)>> queued_events;
     std::atomic_bool stop_requested = false;
+    std::atomic_bool completed = false;
     Common::Event processing_completed;
 
     Core::System& system;

@@ -4,9 +4,11 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 #include <QFileSystemWatcher>
 #include <QStandardItemModel>
 #include <QStringList>
+#include <QTimer>
 #include <QVector>
 
 #include "common/common_types.h"
@@ -83,11 +85,16 @@ private:
 
     void AddFavorite(u64 program_id);
     void RemoveFavorite(u64 program_id);
+    void PruneMissingFiles();
+    void ScheduleRepopulate(bool reset_metadata = false);
     void Repopulate();
     void StopWorker();
+    void CleanupRetiringWorkers();
 
     bool m_flat = false;
     bool scan_enabled = true;
+    bool repopulate_pending = false;
+    bool repopulate_reset_metadata = false;
 
     std::shared_ptr<FileSys::VfsFilesystem> vfs;
     FileSys::ManualContentProvider* provider;
@@ -95,6 +102,8 @@ private:
     Core::System& system;
 
     std::unique_ptr<GameListWorker> current_worker;
+    std::vector<std::unique_ptr<GameListWorker>> retiring_workers;
     QFileSystemWatcher* watcher = nullptr;
     QFileSystemWatcher* external_watcher = nullptr;
+    QTimer* refresh_debounce_timer = nullptr;
 };
