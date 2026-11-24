@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <thread>
 #include <QDir>
 #include <QFileInfo>
 #include <QIcon>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QThreadPool>
 
 #include "common/logging.h"
 #include "common/settings.h"
@@ -119,7 +119,8 @@ void GameListModel::PopulateAsync(QVector<UISettings::GameDir>& game_dirs) {
     connect(current_worker.get(), &GameListWorker::Finished, this,
             &GameListModel::CleanupRetiringWorkers, Qt::QueuedConnection);
 
-    QThreadPool::globalInstance()->start(current_worker.get());
+    GameListWorker* raw_worker = current_worker.get();
+    std::thread([raw_worker] { raw_worker->run(); }).detach();
 }
 
 void GameListModel::WorkerEvent() {
