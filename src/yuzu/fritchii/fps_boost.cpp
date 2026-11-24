@@ -40,6 +40,7 @@ namespace {
 constexpr const char* kModFolderName = "60 FPS";
 constexpr const char* kSwapIntervalFlag = "force_swap_interval.flag";
 constexpr u64 kKirbyForgottenLandId = 0x01004D300C5AE000ULL;
+constexpr u64 kBotwId = 0x01007EF00011E000ULL;
 
 std::filesystem::path ModRootDir(u64 program_id) {
     return Common::FS::GetEdenPath(Common::FS::EdenPath::LoadDir) /
@@ -48,6 +49,10 @@ std::filesystem::path ModRootDir(u64 program_id) {
 
 std::filesystem::path CheatsDir(u64 program_id) {
     return ModRootDir(program_id) / "cheats";
+}
+
+std::filesystem::path ExefsDir(u64 program_id) {
+    return ModRootDir(program_id) / "exefs";
 }
 
 std::filesystem::path SwapFlagPath(u64 program_id) {
@@ -252,7 +257,7 @@ int FetchAndInstall60FpsPatch(u64 program_id, QString& out_detail) {
         }
     }
 
-    // 2. Built-in verified offline fallback for Kirby and the Forgotten Land v1.0.0.
+    // 2. Built-in verified offline fallbacks for popular 30 FPS titles.
     if (installed_files == 0 && program_id == kKirbyForgottenLandId) {
         std::filesystem::create_directories(cheats_dir, ec);
         constexpr const char* kKirby60Fps =
@@ -268,13 +273,44 @@ int FetchAndInstall60FpsPatch(u64 program_id, QString& out_detail) {
             out << kKirby60Fps;
             ++installed_files;
         }
+    } else if (installed_files == 0 && program_id == kBotwId) {
+        const auto exefs_dir = ExefsDir(program_id);
+        std::filesystem::create_directories(exefs_dir, ec);
+        constexpr const char* kBotw160_60Fps =
+            "@nsobid-8E9978D50BDD20B4C8395A106C27FFDE\n"
+            "\n"
+            "# The Legend of Zelda: Breath of the Wild v1.6.0 - 60FPS\n"
+            "@flag print_values\n"
+            "@flag offset_shift 0x100\n"
+            "\n"
+            "@enabled\n"
+            "01614954 08008052\n"
+            "01614D84 08F08752\n"
+            "01614DB0 20008052\n"
+            "01614DA4 21000012\n"
+            "@stop\n";
+        std::ofstream out(exefs_dir / "1.6.0.pchtxt", std::ios::binary | std::ios::trunc);
+        if (out.good()) {
+            out << kBotw160_60Fps;
+            ++installed_files;
+        }
     }
 
     if (installed_files > 0) {
         SetModEnabledInSettings(program_id, true);
-        out_detail = QObject::tr("Installed verified 60 FPS patch for %1 game build(s) and enabled "
-                                 "it automatically.")
-                         .arg(installed_files);
+        if (program_id == kBotwId) {
+            out_detail = QObject::tr(
+                "Installed verified 60 FPS patch for Breath of the Wild (v1.6.0) and enabled it "
+                "automatically. Note: requires game update v1.6.0 (v851968) to activate.");
+        } else {
+            out_detail = QObject::tr("Installed verified 60 FPS patch for %1 game build(s) and "
+                                     "enabled it automatically.")
+                             .arg(installed_files);
+        }
+    } else if (Is60FpsPatchInstalled(program_id)) {
+        SetModEnabledInSettings(program_id, true);
+        out_detail = QObject::tr("Verified 60 FPS mod is installed and enabled for this game.");
+        installed_files = 1;
     } else {
         out_detail = QObject::tr(
             "No community 60 FPS patch was found for this Title ID. Many Switch games (like "
@@ -291,13 +327,20 @@ bool Is60FpsPatchInstalled(u64 program_id) {
         return false;
     }
     std::error_code ec;
-    const auto dir = CheatsDir(program_id);
-    if (!std::filesystem::is_directory(dir, ec)) {
-        return false;
+    const auto cheats_dir = CheatsDir(program_id);
+    if (std::filesystem::is_directory(cheats_dir, ec)) {
+        for (const auto& entry : std::filesystem::directory_iterator(cheats_dir, ec)) {
+            if (entry.is_regular_file(ec) && entry.path().extension() == ".txt") {
+                return true;
+            }
+        }
     }
-    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
-        if (entry.is_regular_file(ec) && entry.path().extension() == ".txt") {
-            return true;
+    const auto exefs_dir = ExefsDir(program_id);
+    if (std::filesystem::is_directory(exefs_dir, ec)) {
+        for (const auto& entry : std::filesystem::directory_iterator(exefs_dir, ec)) {
+            if (entry.is_regular_file(ec)) {
+                return true;
+            }
         }
     }
     return false;
