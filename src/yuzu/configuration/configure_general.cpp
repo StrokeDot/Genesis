@@ -8,9 +8,11 @@
 #include <utility>
 #include <vector>
 #include <QBoxLayout>
+#include <QComboBox>
 #include <QDir>
 #include <QFileDialog>
 #include <QInputDialog>
+#include <QLabel>
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
@@ -21,6 +23,7 @@
 #include "yuzu/configuration/configuration_shared.h"
 #include "yuzu/configuration/configure_general.h"
 #include "yuzu/configuration/shared_widget.h"
+#include "yuzu/fritchii/controller_exit_watcher.h"
 #include "yuzu/fritchii/fritchii_ui.h"
 
 ConfigureGeneral::ConfigureGeneral(const Core::System& system_,
@@ -130,6 +133,31 @@ void ConfigureGeneral::Setup(const ConfigurationShared::Builder& builder) {
     for (const auto& [id, widget] : general_hold) {
         general_layout.addWidget(widget);
     }
+
+    if (Settings::IsConfiguringGlobal()) {
+        auto* row_widget = new QWidget(this);
+        auto* row = new QHBoxLayout(row_widget);
+        row->setContentsMargins(0, 4, 0, 4);
+        auto* label = new QLabel(tr("Controller Exit-Game Shortcut"), row_widget);
+        label->setToolTip(
+            tr("Press this button or combo on Player 1's Xbox controller to exit a running game "
+               "like a console (returns to GameVault when launched from GameVault, or Genesis Home)."));
+        controller_exit_combo = new QComboBox(row_widget);
+        const auto current_mode = UISettings::values.controller_exit_shortcut.GetValue();
+        int selected_index = 0;
+        const auto shortcuts = FritchiiUi::ControllerExitWatcher::AllShortcuts();
+        for (int i = 0; i < static_cast<int>(shortcuts.size()); ++i) {
+            controller_exit_combo->addItem(shortcuts[i].second, static_cast<int>(shortcuts[i].first));
+            if (static_cast<u8>(shortcuts[i].first) == current_mode) {
+                selected_index = i;
+            }
+        }
+        controller_exit_combo->setCurrentIndex(selected_index);
+        row->addWidget(label);
+        row->addStretch(1);
+        row->addWidget(controller_exit_combo);
+        general_layout.addWidget(row_widget);
+    }
 }
 
 // Called to set the callback when resetting settings to defaults
@@ -159,6 +187,10 @@ void ConfigureGeneral::ApplyConfiguration() {
     bool powered_on = system.IsPoweredOn();
     for (const auto& func : apply_funcs) {
         func(powered_on);
+    }
+    if (controller_exit_combo != nullptr) {
+        UISettings::values.controller_exit_shortcut.SetValue(
+            static_cast<u8>(controller_exit_combo->currentData().toInt()));
     }
 
     std::vector<std::string> new_dirs;

@@ -16,6 +16,7 @@ namespace Core {
 class System;
 }
 
+class QComboBox;
 class ConfigureDialog;
 class HotkeyRegistry;
 
@@ -62,6 +63,7 @@ private:
     std::unique_ptr<Ui::ConfigureGeneral> ui;
 
     std::vector<std::function<void(bool)>> apply_funcs{};
+    QComboBox* controller_exit_combo = nullptr;
 
     const Core::System& system;
 };

@@ -100,6 +100,42 @@ void QtConfig::ReadQtPlayerValues(const std::size_t player_index) {
             return;
         }
         if (type == ConfigType::PerGameConfig) {
+            if (profile_name == "__genesis_custom__") {
+                const auto& global_player = Settings::values.players.GetValue(true)[player_index];
+                player = global_player;
+                player.profile_name = profile_name;
+                for (int i = 0; i < Settings::NativeButton::NumButtons; ++i) {
+                    const std::string fallback = global_player.buttons[i].empty()
+                                                     ? InputCommon::GenerateKeyboardParam(
+                                                           default_buttons[i])
+                                                     : global_player.buttons[i];
+                    player.buttons[i] = ReadStringSetting(
+                        std::string(player_prefix).append(Settings::NativeButton::mapping[i]),
+                        fallback);
+                    if (player.buttons[i].empty()) {
+                        player.buttons[i] = fallback;
+                    }
+                }
+                for (int i = 0; i < Settings::NativeAnalog::NumAnalogs; ++i) {
+                    const std::string fallback = global_player.analogs[i];
+                    const std::string val = ReadStringSetting(
+                        std::string(player_prefix).append(Settings::NativeAnalog::mapping[i]),
+                        fallback);
+                    if (!val.empty()) {
+                        player.analogs[i] = val;
+                    }
+                }
+                for (int i = 0; i < Settings::NativeMotion::NumMotions; ++i) {
+                    const std::string fallback = global_player.motions[i];
+                    const std::string val = ReadStringSetting(
+                        std::string(player_prefix).append(Settings::NativeMotion::mapping[i]),
+                        fallback);
+                    if (!val.empty()) {
+                        player.motions[i] = val;
+                    }
+                }
+                return;
+            }
             const auto profile_path = Common::FS::GetEdenPath(Common::FS::EdenPath::ConfigDir) /
                                       "input" / fmt::format("{}.ini", profile_name);
             if (Common::FS::Exists(profile_path)) {

@@ -219,6 +219,10 @@ add_executable(yuzu
     fritchii/fritchii.qrc
     fritchii/fritchii_ui.cpp
     fritchii/fritchii_ui.h
+    fritchii/button_remapper.cpp
+    fritchii/button_remapper.h
+    fritchii/controller_exit_watcher.cpp
+    fritchii/controller_exit_watcher.h
     fritchii/home.cpp
     fritchii/home.h
     fritchii/game_controls.cpp

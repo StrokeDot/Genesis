@@ -394,6 +394,12 @@ QWidget* Home::MakePage() {
             });
         }
         menu.addSeparator();
+        if (hooks.remap_buttons) {
+            menu.addAction(tr("Customize Button Layout..."), &menu, [this] {
+                hooks.remap_buttons(hero_id, hero_title, hero_path.toStdString());
+            });
+            menu.addSeparator();
+        }
         menu.addAction(tr("Delete Shader Cache..."), &menu,
                        [this] { hooks.delete_shader_cache(hero_id); });
         menu.exec(page->mapToGlobal(pos));
@@ -523,6 +529,22 @@ QWidget* Home::MakePage() {
     });
     action_row->addWidget(play);
 
+    controls_button = new QPushButton(tr("Controls"), page);
+    controls_button->setObjectName(QStringLiteral("FritchiiLink"));
+    controls_button->setCursor(Qt::PointingHandCursor);
+    controls_button->setFocusPolicy(Qt::NoFocus);
+    controls_button->setMinimumHeight(44);
+    controls_button->setMaximumHeight(44);
+    controls_button->setToolTip(
+        tr("Customize per-game button layout and Xbox controller exit shortcut."));
+    controls_button->hide();
+    connect(controls_button, &QPushButton::clicked, this, [this] {
+        if (!hero_path.isEmpty() && hooks.remap_buttons) {
+            hooks.remap_buttons(hero_id, hero_title, hero_path.toStdString());
+        }
+    });
+    action_row->addWidget(controls_button);
+
     addons_button = new QPushButton(tr("Updates & DLC"), page);
     addons_button->setObjectName(QStringLiteral("FritchiiLink"));
     addons_button->setCursor(Qt::PointingHandCursor);
@@ -633,6 +655,9 @@ void Home::UpdateHero(const QString& path, u64 program_id, const QString& game_t
     title->setText(game_title);
     play->setText(tr("Play"));
     play->setIcon(Glyph(QStringLiteral("play"), 0x1c1433, 18));
+    if (controls_button) {
+        controls_button->show();
+    }
     addons_button->show();
 }
 
@@ -983,6 +1008,9 @@ void Home::Refresh() {
         update_badge->hide();
         dlc_badge->hide();
         mods_badge->hide();
+        if (controls_button) {
+            controls_button->hide();
+        }
         addons_button->hide();
         title->setText(tr("Add your games"));
         play->setText(tr("Add Folder"));

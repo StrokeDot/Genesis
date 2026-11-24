@@ -86,6 +86,15 @@ struct GameDir {
     }
 };
 
+enum class ControllerExitShortcut : u8 {
+    Off = 0,
+    ViewAndMenu = 1,
+    GuideButton = 2,
+    HoldGuideButton = 3,
+    LbRbViewMenu = 4,
+    ClickBothSticks = 5,
+};
+
 struct Values {
     Settings::Linkage linkage{1000};
 
@@ -102,7 +111,7 @@ struct Values {
     Setting<bool> show_status_bar{linkage, true, "showStatusBar", Category::Ui};
 
     SwitchableSetting<ConfirmStop> confirm_before_stopping{linkage,
-                                                           ConfirmStop::Ask_Always,
+                                                           ConfirmStop::Ask_Never,
                                                            "confirmStop",
                                                            Category::UiGeneral,
                                                            Settings::Specialization::Default,
@@ -176,6 +185,11 @@ struct Values {
     Setting<bool> gui_hide_backend_warning{linkage, false, "gui_hide_backend_warning",
                                            Category::UiGeneral};
 #endif
+
+    // Console-style controller shortcut to exit a running game (ControllerExitShortcut enum).
+    Setting<u8> controller_exit_shortcut{
+        linkage, static_cast<u8>(ControllerExitShortcut::ViewAndMenu), "controller_exit_shortcut",
+        Category::Ui};
 
     // Discord RPC
     Setting<bool> enable_discord_presence{linkage, false, "enable_discord_presence", Category::Ui};

@@ -8,6 +8,7 @@
 #include "ui_configure_input_per_game.h"
 #include "yuzu/configuration/configure_input_per_game.h"
 #include "yuzu/configuration/input_profiles.h"
+#include "yuzu/fritchii/button_remapper.h"
 
 ConfigureInputPerGame::ConfigureInputPerGame(Core::System& system_, QtConfig* config_,
                                              QWidget* parent)
@@ -31,14 +32,23 @@ ConfigureInputPerGame::ConfigureInputPerGame(Core::System& system_, QtConfig* co
             Settings::values.players.GetValue()[player_index].profile_name;
 
         auto* const player_combobox = profile_comboboxes[player_index];
-        player_combobox->addItem(tr("Use global input configuration"));
+        player_combobox->addItem(tr("Use global input configuration"), QString());
+
+        const bool has_custom_layout =
+            previous_profile == FritchiiUi::CustomPerGameLayoutProfile;
+        if (has_custom_layout) {
+            player_combobox->addItem(
+                tr("Custom button layout (this game)"),
+                QString::fromLatin1(FritchiiUi::CustomPerGameLayoutProfile));
+            player_combobox->setCurrentIndex(1);
+        }
 
         for (size_t index = 0; index < profile_names.size(); ++index) {
             const auto& profile_name = profile_names[index];
-            player_combobox->addItem(QString::fromStdString(profile_name));
-            if (profile_name == previous_profile) {
-                // offset by 1 since the first element is the global config
-                player_combobox->setCurrentIndex(static_cast<int>(index + 1));
+            const QString qname = QString::fromStdString(profile_name);
+            player_combobox->addItem(qname, qname);
+            if (!has_custom_layout && profile_name == previous_profile) {
+                player_combobox->setCurrentIndex(player_combobox->count() - 1);
             }
         }
     };
@@ -75,11 +85,18 @@ void ConfigureInputPerGame::LoadConfiguration() {
             emulated_controller->ReloadFromSettings();
             continue;
         }
-        const auto profile_name = player_combobox->itemText(selection_index).toStdString();
+        const auto profile_name =
+            player_combobox->itemData(selection_index).toString().toStdString();
         if (profile_name.empty()) {
             continue;
         }
         auto& player = Settings::values.players.GetValue()[player_index];
+        if (profile_name == FritchiiUi::CustomPerGameLayoutProfile) {
+            // Preserve the custom per-game button bindings already loaded for this player.
+            player.profile_name = profile_name;
+            emulated_controller->ReloadFromSettings();
+            continue;
+        }
         player.profile_name = profile_name;
         // Read from the profile into the custom player settings
         profiles->LoadProfile(profile_name, player_index);

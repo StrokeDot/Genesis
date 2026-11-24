@@ -27,6 +27,8 @@ struct HomeHooks {
     std::function<void()> add_folder;
     std::function<void()> open_settings;
     std::function<void(u64 program_id, const std::string& path)> game_settings;
+    std::function<void(u64 program_id, const QString& game_title, const std::string& path)>
+        remap_buttons;
     std::function<void(u64 program_id)> delete_shader_cache; ///< after a confirmation
     /// Fills a menu with the game list's own right-click entries for the game (mod folders,
     /// dumps, Remove, Verify Integrity, Configure Game...).
@@ -85,6 +87,7 @@ private:
     QLabel* mods_badge = nullptr;
     QLabel* title = nullptr;
     QPushButton* play = nullptr;
+    QPushButton* controls_button = nullptr;
     QPushButton* addons_button = nullptr;
     QVBoxLayout* sections_layout = nullptr;
     QWidget* sections_box = nullptr;

@@ -13,6 +13,7 @@
 #include "qt_common/qt_common.h"
 #include "qt_common/util/game.h"
 #include "ui_main.h"
+#include "yuzu/fritchii/button_remapper.h"
 #include "yuzu/fritchii/fritchii_ui.h"
 #include "yuzu/bootmanager.h"
 #include "yuzu/fritchii/game_controls.h"
@@ -100,6 +101,14 @@ void MainWindow::SetUpFritchiiUi() {
         .game_settings =
             [this](u64 program_id, const std::string& path) {
                 OpenPerGameConfiguration(program_id, path);
+            },
+        .remap_buttons =
+            [this](u64 program_id, const QString& game_title, const std::string& path) {
+                if (FritchiiUi::ShowButtonRemapperDialog(this, *QtCommon::system,
+                                                         input_subsystem.get(), program_id,
+                                                         game_title, path)) {
+                    OnSaveConfig();
+                }
             },
         .delete_shader_cache = delete_shader_cache,
         .game_menu =

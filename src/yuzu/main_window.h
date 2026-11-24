@@ -134,6 +134,11 @@ namespace Service::NFP {
 enum class CabinetMode : u8;
 } // namespace Service::NFP
 
+namespace FritchiiUi {
+class ControllerExitWatcher;
+class Home;
+}
+
 namespace Ui {
 class MainWindow;
 }
@@ -371,6 +376,7 @@ private slots:
     void OnPauseGame();
     void OnPauseContinueGame();
     void OnStopGame();
+    void OnControllerExitGame();
     void OnPrepareForSleep(bool prepare_sleep);
     void OnMenuReportCompatibility();
     void OnOpenModsPage();
@@ -593,6 +599,7 @@ private:
 
     GameListPlaceholder* game_list_placeholder = nullptr;
     FritchiiUi::Home* fritchii_home = nullptr;
+    FritchiiUi::ControllerExitWatcher* controller_exit_watcher = nullptr;
 
     std::vector<VkDeviceInfo::Record> vk_device_records;
 

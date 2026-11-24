@@ -66,6 +66,7 @@
 
 #include "util/clickable_label.h"
 #include "util/controller_navigation.h"
+#include "yuzu/fritchii/controller_exit_watcher.h"
 #include "util/export_log.h"
 #include "util/profiling_mode.h"
 #include "fritchii/cache_cleanup.h"
@@ -547,6 +548,15 @@ MainWindow::MainWindow(bool has_broken_vulkan)
 
     QtCommon::SetupHID();
     controller_dialog->refreshConfiguration();
+
+    controller_exit_watcher =
+        new FritchiiUi::ControllerExitWatcher(QtCommon::system->HIDCore(), this);
+    connect(this, &MainWindow::EmulationStarting, controller_exit_watcher,
+            [this] { controller_exit_watcher->SetActive(true); });
+    connect(this, &MainWindow::EmulationStopping, controller_exit_watcher,
+            [this] { controller_exit_watcher->SetActive(false); });
+    connect(controller_exit_watcher, &FritchiiUi::ControllerExitWatcher::ExitGameRequested, this,
+            &MainWindow::OnControllerExitGame);
 
     UpdateWindowTitle();
 
@@ -2879,12 +2889,14 @@ bool MainWindow::OnShutdownBegin() {
     connect(QtCommon::emu_thread.get(), &QThread::finished, this, &MainWindow::OnEmulationStopped);
     emit EmulationStopping();
 
-    int shutdown_time = 1000;
+    // Fast console-style shutdown: give the guest a brief window to respond to RequestGameExit()
+    // before force-stopping, rather than blocking for 1-5 seconds on games that ignore exit locks.
+    int shutdown_time = 150;
 
     if (QtCommon::system->DebuggerEnabled()) {
         shutdown_time = 0;
     } else if (QtCommon::system->GetExitLocked()) {
-        shutdown_time = 5000;
+        shutdown_time = 250;
     }
 
     shutdown_timer.setSingleShot(true);
@@ -2988,12 +3000,14 @@ void MainWindow::OnEmulationStopped() {
     render_window->hide();
     loading_screen->hide();
     loading_screen->Clear();
-    if (game_list->IsEmpty()) {
-        game_list_placeholder->show();
-    } else {
-        game_list->show();
+    if (!close_pending) {
+        if (game_list->IsEmpty()) {
+            game_list_placeholder->show();
+        } else {
+            game_list->show();
+        }
+        game_list->SetFilterFocus();
     }
-    game_list->SetFilterFocus();
     tas_label->clear();
     input_subsystem->GetTas()->Stop();
     OnTasStateChanged();
@@ -3034,8 +3048,10 @@ void MainWindow::OnEmulationStopped() {
     game_list->setEnabled(true);
 
     Settings::RestoreGlobalState(QtCommon::system->IsPoweredOn());
-    QtCommon::system->HIDCore().ReloadInputDevices();
-    UpdateStatusButtons();
+    if (!close_pending) {
+        QtCommon::system->HIDCore().ReloadInputDevices();
+        UpdateStatusButtons();
+    }
     LOG_INFO(Frontend, "Emulation cleanup completed");
     // The faster occlusion mode for AMD: offered once, a moment after a game that could use it
     // (or at the next launch when the app is closing now or another window is up).
@@ -3063,7 +3079,9 @@ void MainWindow::OnEmulationStopped() {
         QTimer::singleShot(0, this, &QWidget::close);
     } else if (!boot_in_progress) {
         game_list->SetScanEnabled(true);
-        game_list->PopulateAsync(UISettings::values.game_dirs);
+        if (game_list->IsEmpty() || UISettings::values.is_game_list_reload_pending.exchange(false)) {
+            game_list->PopulateAsync(UISettings::values.game_dirs);
+        }
     }
 }
 
@@ -3929,6 +3947,23 @@ void MainWindow::OnStopGame() {
         } else {
             OnEmulationStopped();
         }
+    }
+}
+
+void MainWindow::OnControllerExitGame() {
+    if (!emulation_running || QtCommon::system->IsShuttingDown()) {
+        return;
+    }
+    LOG_INFO(Frontend, "Controller exit shortcut triggered (launched_with_game={})",
+             launched_with_game);
+    if (launched_with_game) {
+        close_pending = true;
+    }
+    play_time_manager->Stop();
+    if (OnShutdownBegin()) {
+        OnShutdownBeginDialog();
+    } else {
+        OnEmulationStopped();
     }
 }
 
@@ -6403,8 +6438,8 @@ bool MainWindow::ConfirmClose() {
         UISettings::values.confirm_before_stopping.GetValue() == ConfirmStop::Ask_Based_On_Game)
         return true;
 
-    const auto text = tr("Are you sure you want to close Fritchii?");
-    return question(this, tr("Fritchii"), text);
+    const auto text = tr("Are you sure you want to close Genesis?");
+    return question(this, tr("Genesis"), text);
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
@@ -6440,6 +6475,9 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 
     // Unload controllers early
     Common::ShutdownWatch::Step("frontend close: unloading controllers");
+    if (controller_exit_watcher) {
+        controller_exit_watcher->UnloadController();
+    }
     controller_dialog->UnloadController();
     game_list->UnloadController();
 
