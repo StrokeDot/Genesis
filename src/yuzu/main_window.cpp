@@ -66,6 +66,7 @@
 
 #include "util/clickable_label.h"
 #include "util/controller_navigation.h"
+#include "yuzu/fritchii/closing_overlay.h"
 #include "yuzu/fritchii/controller_exit_watcher.h"
 #include "yuzu/fritchii/fps_boost.h"
 
@@ -2901,14 +2902,14 @@ bool MainWindow::OnShutdownBegin() {
     connect(QtCommon::emu_thread.get(), &QThread::finished, this, &MainWindow::OnEmulationStopped);
     emit EmulationStopping();
 
-    // Fast console-style shutdown: give the guest a brief window to respond to RequestGameExit()
-    // before force-stopping, rather than blocking for 1-5 seconds on games that ignore exit locks.
-    int shutdown_time = 150;
+    // Fast hard console-style shutdown: brief window for guest exit hook before immediate
+    // ForceStop while the glitter closing animation plays smoothly over teardown.
+    int shutdown_time = 60;
 
     if (QtCommon::system->DebuggerEnabled()) {
         shutdown_time = 0;
     } else if (QtCommon::system->GetExitLocked()) {
-        shutdown_time = 250;
+        shutdown_time = 100;
     }
 
     shutdown_timer.setSingleShot(true);
@@ -2925,6 +2926,16 @@ bool MainWindow::OnShutdownBegin() {
 }
 
 void MainWindow::OnShutdownBeginDialog() {
+    if (FritchiiUi::Enabled()) {
+        if (closing_overlay) {
+            closing_overlay->DismissImmediate();
+            closing_overlay = nullptr;
+        }
+        const QString subtitle =
+            close_pending ? tr("Shutting down Genesis") : tr("Returning to Genesis Home");
+        closing_overlay = new FritchiiUi::ClosingOverlay(this, subtitle);
+        return;
+    }
     shutdown_dialog =
         new OverlayDialog(this, *QtCommon::system, QString{}, tr("Closing software..."), QString{},
                           QString{}, Qt::AlignHCenter | Qt::AlignVCenter);
@@ -2996,6 +3007,14 @@ void MainWindow::OnEmulationStopped() {
     if (shutdown_dialog) {
         shutdown_dialog->deleteLater();
         shutdown_dialog = nullptr;
+    }
+    if (closing_overlay) {
+        if (close_pending) {
+            closing_overlay->DismissImmediate();
+        } else {
+            closing_overlay->FinishAndFadeOut();
+        }
+        closing_overlay = nullptr;
     }
 
     emulation_running = false;
