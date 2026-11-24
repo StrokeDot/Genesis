@@ -71,17 +71,17 @@ QString ControllerExitWatcher::ShortcutLabel(UISettings::ControllerExitShortcut 
     case UISettings::ControllerExitShortcut::Off:
         return tr("Off (Disabled)");
     case UISettings::ControllerExitShortcut::ViewAndMenu:
-        return tr("View + Menu (Back + Start)");
+        return tr("View + Menu (2 small center buttons)");
     case UISettings::ControllerExitShortcut::GuideButton:
-        return tr("Xbox Guide / Home Button (Tap)");
+        return tr("Xbox Guide Button (center Xbox logo - Tap)");
     case UISettings::ControllerExitShortcut::HoldGuideButton:
-        return tr("Xbox Guide / Home Button (Hold 0.5s)");
+        return tr("Xbox Guide Button (center Xbox logo - Hold 0.5s)");
     case UISettings::ControllerExitShortcut::LbRbViewMenu:
-        return tr("LB + RB + View + Menu");
+        return tr("LB + RB + View + Menu (4-button combo)");
     case UISettings::ControllerExitShortcut::ClickBothSticks:
-        return tr("L-Stick + R-Stick (Click Both)");
+        return tr("Click Both Sticks (press LS + RS down)");
     }
-    return tr("View + Menu (Back + Start)");
+    return tr("View + Menu (2 small center buttons)");
 }
 
 std::vector<std::pair<UISettings::ControllerExitShortcut, QString>>
