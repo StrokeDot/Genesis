@@ -1126,9 +1126,17 @@ size_t DmaPusher::ProcessCommands(std::span<const CommandHeader> commands, size_
                         ++batch_count;
                     }
                     if (batch_count > 1) {
-                        subchannel->method_sink.reserve(subchannel->method_sink.size() + batch_count);
+                        const size_t needed = subchannel->method_sink.size() + batch_count;
+                        if (needed > subchannel->method_sink.capacity()) {
+                            subchannel->method_sink.reserve((std::max)(
+                                needed, (std::max)(subchannel->method_sink.capacity() * 2,
+                                                   size_t{256})));
+                        }
                         for (u32 i = 0; i < batch_count; ++i) {
                             subchannel->method_sink.emplace_back(dma_state.method + i, commands[index + i].argument);
+                        }
+                        if (subchannel->method_sink.size() >= 4096) {
+                            subchannel->ConsumeSink(system);
                         }
                         dma_state.method += batch_count;
                         dma_state.method_count -= batch_count;
@@ -1340,6 +1348,9 @@ void DmaPusher::CallMethod(u32 argument) {
         }
         if (!subchannel->execution_mask[dma_state.method]) {
             subchannel->method_sink.emplace_back(dma_state.method, argument);
+            if (subchannel->method_sink.size() >= 4096) {
+                subchannel->ConsumeSink(system);
+            }
         } else {
             VideoCommon::Nx2Profile::Scope method_scope{VideoCommon::Nx2Profile::Zone::Method};
             subchannel->ConsumeSink(system);

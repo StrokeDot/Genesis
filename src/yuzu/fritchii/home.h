@@ -61,7 +61,9 @@ private:
     void Restore();
     void Refresh();
     void UpdateHero(const QString& path, u64 program_id, const QString& game_title,
-                    bool is_switch2, const QPixmap& icon);
+                    bool is_switch2, const QPixmap& icon, const QString& addons_text);
+    void ShowHeroAddonsDialog();
+    void ShowLibraryAddonsDialog();
 
     QWidget* MakeRail();
     QWidget* MakePage();
@@ -78,8 +80,12 @@ private:
     QComboBox* system_filter_combo = nullptr;
     QLabel* cover = nullptr;
     QLabel* system_badge = nullptr;
+    QLabel* update_badge = nullptr;
+    QLabel* dlc_badge = nullptr;
+    QLabel* mods_badge = nullptr;
     QLabel* title = nullptr;
     QPushButton* play = nullptr;
+    QPushButton* addons_button = nullptr;
     QVBoxLayout* sections_layout = nullptr;
     QWidget* sections_box = nullptr;
     QTimer* refresh_timer = nullptr;
@@ -87,6 +93,8 @@ private:
     bool list_mode = false;
     bool sections_dirty = true;
     QString hero_path;
+    QString hero_title;
+    QString hero_addons;
     u64 hero_id = 0;
 };
 

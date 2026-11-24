@@ -42,6 +42,8 @@ public:
         INSERT_PADDING_BYTES_NOINIT(0x48);
     } regs{};
 private:
-    void ConsumeSinkImpl(Core::System& system) override {}
+    void ConsumeSinkImpl(Core::System& system) override {
+        method_sink.clear();
+    }
 };
 }
