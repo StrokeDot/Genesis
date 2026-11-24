@@ -21,5 +21,6 @@
         <file>icons/community.svg</file>
         <file>icons/heart.svg</file>
         <file>icons/coffee.svg</file>
+        <file>icons/controller_xbox.png</file>
     </qresource>
 </RCC>

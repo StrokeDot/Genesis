@@ -22,6 +22,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPixmap>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSignalBlocker>
@@ -584,9 +585,10 @@ public:
     };
 
     explicit OfficialControllerVisual(QWidget* parent = nullptr) : QWidget(parent) {
-        setMinimumSize(410, 385);
+        setMinimumSize(430, 415);
         setMouseTracking(true);
         setCursor(Qt::PointingHandCursor);
+        xbox_pixmap.load(QStringLiteral(":/fritchii/icons/controller_xbox.png"));
     }
 
     void SetClickHandler(std::function<void(std::size_t row_index)> handler) {
@@ -674,9 +676,9 @@ protected:
         const qreal h = height();
         const qreal cx = w * 0.5;
 
-        // Card container
+        // Card container (matches controller_xbox.png backdrop #191921 seamlessly)
         p.setPen(QPen(QColor(0x2b, 0x2b, 0x36), 1.0));
-        p.setBrush(QColor(0x18, 0x18, 0x20));
+        p.setBrush(QColor(0x19, 0x19, 0x21));
         p.drawRoundedRect(QRectF(0.5, 0.5, w - 1.0, h - 1.0), 12.0, 12.0);
 
         // Top badge showing detected profile + controller family
@@ -750,13 +752,13 @@ protected:
         tiny_font.setWeight(QFont::DemiBold);
 
         // =========================================================================
-        // 1. TOP EDGE VIEW: Triggers & Bumpers (LT/LB - USB-C - RB/RT)
+        // 1. TOP EDGE VIEW: Triggers & Bumpers (LT/LB - RB/RT)
         // =========================================================================
-        const qreal top_y = 38.0;
-        const QRectF lt_rect(cx - 148, top_y, 58, 24);
-        const QRectF lb_rect(cx - 82, top_y + 2, 54, 22);
-        const QRectF rb_rect(cx + 28, top_y + 2, 54, 22);
-        const QRectF rt_rect(cx + 90, top_y, 58, 24);
+        const qreal top_y = 36.0;
+        const QRectF lt_rect(cx - 154, top_y, 62, 24);
+        const QRectF lb_rect(cx - 84, top_y + 1, 56, 22);
+        const QRectF rb_rect(cx + 28, top_y + 1, 56, 22);
+        const QRectF rt_rect(cx + 92, top_y, 62, 24);
 
         const auto draw_top_btn = [&](const QRectF& rect, PadOptionIndex idx) {
             draw_ring_rect(rect, 8.0, idx);
@@ -766,7 +768,7 @@ protected:
                                   : (sel_hl ? QColor(0xc0, 0x84, 0xfc) : QColor(0x4b, 0x4b, 0x60)),
                           1.4));
             p.setBrush(exit_hl ? QColor(0x52, 0x2f, 0x0d)
-                               : (sel_hl ? QColor(0x32, 0x23, 0x50) : QColor(0x28, 0x28, 0x34)));
+                               : (sel_hl ? QColor(0x32, 0x23, 0x50) : QColor(0x25, 0x25, 0x31)));
             p.drawRoundedRect(rect, 8.0, 8.0);
             p.setFont(btn_font);
             p.setPen(QColor(0xec, 0xec, 0xf1));
@@ -776,15 +778,83 @@ protected:
 
         draw_top_btn(lt_rect, PAD_LT);
         draw_top_btn(lb_rect, PAD_LB);
-        // Subtle USB-C port indicator in center
-        p.setPen(QPen(QColor(0x45, 0x45, 0x56), 1.2));
-        p.setBrush(QColor(0x13, 0x13, 0x19));
-        p.drawRoundedRect(QRectF(cx - 12, top_y + 8, 24, 9), 4.0, 4.0);
         draw_top_btn(rb_rect, PAD_RB);
         draw_top_btn(rt_rect, PAD_RT);
 
         // =========================================================================
-        // 2. OFFICIAL FRONT VIEW SILHOUETTE (centered around cx, cy)
+        // 2. STUDIO-QUALITY XBOX SERIES X|S GRAPHIC WITH EXACT CALIBRATED HOTSPOTS
+        // =========================================================================
+        if (family == ControllerFamily::Xbox && !xbox_pixmap.isNull()) {
+            const QRectF stage(14.0, 64.0, w - 28.0, h - 148.0);
+            const qreal img_aspect =
+                static_cast<qreal>(xbox_pixmap.width()) / static_cast<qreal>(xbox_pixmap.height());
+            qreal draw_w = stage.width();
+            qreal draw_h = draw_w / img_aspect;
+            if (draw_h > stage.height()) {
+                draw_h = stage.height();
+                draw_w = draw_h * img_aspect;
+            }
+            const QRectF img_rect(stage.center().x() - draw_w * 0.5,
+                                  stage.center().y() - draw_h * 0.5, draw_w, draw_h);
+
+            p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            p.drawPixmap(img_rect.toRect(), xbox_pixmap);
+
+            // Overlay interactive glows & click hotspots at exact calibrated coordinates
+            const auto spot = [&](qreal nx, qreal ny, qreal nr, PadOptionIndex idx) {
+                const QPointF pt(img_rect.left() + nx * img_rect.width(),
+                                 img_rect.top() + ny * img_rect.height());
+                const qreal r = nr * img_rect.width();
+                const bool exit_hl = is_exit_pad(idx);
+                const bool sel_hl = is_selected_pad(idx) || is_hovered_pad(idx);
+                if (exit_hl) {
+                    p.setPen(QPen(QColor(0xf5, 0x9e, 0x0b, 145), 6.0));
+                    p.setBrush(QColor(0xf5, 0x9e, 0x0b, 42));
+                    p.drawEllipse(pt, r + 2.5, r + 2.5);
+                    p.setPen(QPen(QColor(0xfd, 0xe6, 0x8a), 2.0));
+                    p.setBrush(Qt::NoBrush);
+                    p.drawEllipse(pt, r + 1.0, r + 1.0);
+                }
+                if (sel_hl) {
+                    p.setPen(QPen(QColor(0xa8, 0x55, 0xf7, 175), 5.0));
+                    p.setBrush(QColor(0xa8, 0x55, 0xf7, 36));
+                    p.drawEllipse(pt, r + 2.0, r + 2.0);
+                    p.setPen(QPen(QColor(0xe9, 0xd5, 0xff), 1.8));
+                    p.setBrush(Qt::NoBrush);
+                    p.drawEllipse(pt, r + 0.5, r + 0.5);
+                }
+                hit_regions.push_back(
+                    {QRectF(pt.x() - r - 3.0, pt.y() - r - 3.0, (r + 3.0) * 2.0, (r + 3.0) * 2.0),
+                     idx, pad_actions[idx].row_index});
+            };
+
+            // Calibrated to controller_xbox.png (960x663)
+            spot(0.500, 0.183, 0.043, PAD_GUIDE);
+            spot(0.433, 0.312, 0.029, PAD_VIEW);
+            spot(0.568, 0.312, 0.029, PAD_MENU);
+            spot(0.260, 0.312, 0.070, PAD_LS);
+            spot(0.620, 0.514, 0.070, PAD_RS);
+            spot(0.378, 0.460, 0.030, PAD_DUP);
+            spot(0.378, 0.590, 0.030, PAD_DDOWN);
+            spot(0.334, 0.525, 0.030, PAD_DLEFT);
+            spot(0.422, 0.525, 0.030, PAD_DRIGHT);
+            spot(0.739, 0.228, 0.038, PAD_NORTH); // Y (Yellow)
+            spot(0.675, 0.316, 0.038, PAD_WEST);  // X (Blue)
+            spot(0.803, 0.316, 0.038, PAD_EAST);  // B (Red)
+            spot(0.739, 0.405, 0.038, PAD_SOUTH); // A (Green)
+
+            // Also make the visual LB/RB shoulders on the image itself clickable!
+            hit_regions.push_back({QRectF(img_rect.left() + 0.19 * img_rect.width(),
+                                          img_rect.top() + 0.06 * img_rect.height(),
+                                          0.16 * img_rect.width(), 0.08 * img_rect.height()),
+                                   PAD_LB, pad_actions[PAD_LB].row_index});
+            hit_regions.push_back({QRectF(img_rect.left() + 0.65 * img_rect.width(),
+                                          img_rect.top() + 0.06 * img_rect.height(),
+                                          0.16 * img_rect.width(), 0.08 * img_rect.height()),
+                                   PAD_RB, pad_actions[PAD_RB].row_index});
+        } else {
+        // =========================================================================
+        // 2B. FALLBACK VECTOR FRONT VIEW (PlayStation / Switch Pro)
         // =========================================================================
         const qreal cy = 186.0;
         {
@@ -1058,6 +1128,7 @@ protected:
             draw_face(east_pt, PAD_EAST, QColor(0xef, 0x44, 0x44), QColor(0x45, 0x16, 0x19));
             draw_face(south_pt, PAD_SOUTH, QColor(0x22, 0xc5, 0x5e), QColor(0x11, 0x36, 0x20));
         }
+        } // end fallback vector branch
 
         // =========================================================================
         // 6. CLEAN INSPECTOR & EXIT-GAME STATUS FOOTER INSIDE THE CARD
@@ -1130,6 +1201,7 @@ private:
         std::optional<std::size_t> row_index;
     };
 
+    QPixmap xbox_pixmap;
     ControllerFamily family = ControllerFamily::Xbox;
     QString profile_badge;
     std::array<ButtonBindingSummary, kPadOptions.size()> pad_actions{};
