@@ -223,6 +223,8 @@ add_executable(yuzu
     fritchii/button_remapper.h
     fritchii/controller_exit_watcher.cpp
     fritchii/controller_exit_watcher.h
+    fritchii/fps_boost.cpp
+    fritchii/fps_boost.h
     fritchii/home.cpp
     fritchii/home.h
     fritchii/game_controls.cpp

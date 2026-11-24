@@ -18,6 +18,10 @@ namespace Service::Nvnflinger {
 
 using ConsumerId = s32;
 
+/// Experimental per-game toggle: clamps swap_interval == 2 (30 Hz) to 1 (60 Hz) for games
+/// that use variable delta-time without a dedicated 60 FPS patch.
+void SetForce60FpsSwapInterval(bool enabled);
+
 class HardwareComposer {
 public:
     explicit HardwareComposer();

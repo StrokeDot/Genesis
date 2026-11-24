@@ -67,6 +67,11 @@
 #include "util/clickable_label.h"
 #include "util/controller_navigation.h"
 #include "yuzu/fritchii/controller_exit_watcher.h"
+#include "yuzu/fritchii/fps_boost.h"
+
+namespace Service::Nvnflinger {
+void SetForce60FpsSwapInterval(bool enabled);
+}
 #include "util/export_log.h"
 #include "util/profiling_mode.h"
 #include "fritchii/cache_cleanup.h"
@@ -2593,6 +2598,7 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
     }
 
     Settings::SetSwitch1Session(Settings::IsSwitch1ProgramId(title_id));
+    Service::Nvnflinger::SetForce60FpsSwapInterval(FritchiiUi::HasForce60FpsSwapInterval(title_id));
     {
         Settings::HardwareDisplayProfile hw{};
         std::string gpu_name = "Unknown GPU";
@@ -3054,6 +3060,7 @@ void MainWindow::OnEmulationStopped() {
     game_list->setEnabled(true);
 
     Settings::RestoreGlobalState(QtCommon::system->IsPoweredOn());
+    Service::Nvnflinger::SetForce60FpsSwapInterval(false);
     if (!close_pending) {
         QtCommon::system->HIDCore().ReloadInputDevices();
         UpdateStatusButtons();
@@ -4508,6 +4515,7 @@ void MainWindow::OnConfigureTas() {
 
     if (result != QDialog::Accepted && !UISettings::values.configuration_applied) {
         Settings::RestoreGlobalState(QtCommon::system->IsPoweredOn());
+    Service::Nvnflinger::SetForce60FpsSwapInterval(false);
         return;
     } else if (result == QDialog::Accepted) {
         dialog.ApplyConfiguration();
@@ -4689,6 +4697,7 @@ void MainWindow::OpenPerGameConfiguration(u64 title_id, const std::string& file_
 
     if (result != QDialog::Accepted && !UISettings::values.configuration_applied) {
         Settings::RestoreGlobalState(QtCommon::system->IsPoweredOn());
+    Service::Nvnflinger::SetForce60FpsSwapInterval(false);
         return;
     } else if (result == QDialog::Accepted) {
         dialog.ApplyConfiguration();

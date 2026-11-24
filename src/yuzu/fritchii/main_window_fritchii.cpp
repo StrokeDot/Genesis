@@ -14,6 +14,7 @@
 #include "qt_common/util/game.h"
 #include "ui_main.h"
 #include "yuzu/fritchii/button_remapper.h"
+#include "yuzu/fritchii/fps_boost.h"
 #include "yuzu/fritchii/fritchii_ui.h"
 #include "yuzu/bootmanager.h"
 #include "yuzu/fritchii/game_controls.h"
@@ -107,6 +108,12 @@ void MainWindow::SetUpFritchiiUi() {
                 if (FritchiiUi::ShowButtonRemapperDialog(this, *QtCommon::system,
                                                          input_subsystem.get(), program_id,
                                                          game_title, path)) {
+                    OnSaveConfig();
+                }
+            },
+        .fps_boost =
+            [this](u64 program_id, const QString& game_title) {
+                if (FritchiiUi::Show60FpsBoostDialog(this, program_id, game_title)) {
                     OnSaveConfig();
                 }
             },

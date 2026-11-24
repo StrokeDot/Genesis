@@ -35,6 +35,7 @@
 #include "qt_common/game_list/game_list_p.h"
 #include "qt_common/game_list/model.h"
 #include "qt_common/game_list/scan_index.h"
+#include "yuzu/fritchii/fps_boost.h"
 #include "yuzu/fritchii/fritchii_ui.h"
 #include "yuzu/fritchii/saves_window.h"
 
@@ -545,6 +546,25 @@ QWidget* Home::MakePage() {
     });
     action_row->addWidget(controls_button);
 
+    fps_button = new QPushButton(tr("60 FPS"), page);
+    fps_button->setObjectName(QStringLiteral("FritchiiLink"));
+    fps_button->setCursor(Qt::PointingHandCursor);
+    fps_button->setFocusPolicy(Qt::NoFocus);
+    fps_button->setMinimumHeight(44);
+    fps_button->setMaximumHeight(44);
+    fps_button->setToolTip(
+        tr("Install or toggle a verified 60 FPS patch for 30 FPS Switch games."));
+    fps_button->hide();
+    connect(fps_button, &QPushButton::clicked, this, [this] {
+        if (!hero_path.isEmpty() && hooks.fps_boost) {
+            hooks.fps_boost(hero_id, hero_title);
+            const QChar check(0x2713);
+            const bool active = Is60FpsBoostActive(hero_id);
+            fps_button->setText(active ? tr("%1 60 FPS").arg(check) : tr("60 FPS"));
+        }
+    });
+    action_row->addWidget(fps_button);
+
     addons_button = new QPushButton(tr("Updates & DLC"), page);
     addons_button->setObjectName(QStringLiteral("FritchiiLink"));
     addons_button->setCursor(Qt::PointingHandCursor);
@@ -657,6 +677,11 @@ void Home::UpdateHero(const QString& path, u64 program_id, const QString& game_t
     play->setIcon(Glyph(QStringLiteral("play"), 0x1c1433, 18));
     if (controls_button) {
         controls_button->show();
+    }
+    if (fps_button) {
+        const bool boost_active = Is60FpsBoostActive(program_id);
+        fps_button->setText(boost_active ? tr("%1 60 FPS").arg(check) : tr("60 FPS"));
+        fps_button->show();
     }
     addons_button->show();
 }
@@ -1010,6 +1035,9 @@ void Home::Refresh() {
         mods_badge->hide();
         if (controls_button) {
             controls_button->hide();
+        }
+        if (fps_button) {
+            fps_button->hide();
         }
         addons_button->hide();
         title->setText(tr("Add your games"));

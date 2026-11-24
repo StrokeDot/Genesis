@@ -3,6 +3,7 @@
 
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <atomic>
 #include <optional>
 
 #include <boost/container/small_vector.hpp>
@@ -17,6 +18,8 @@
 namespace Service::Nvnflinger {
 
 namespace {
+
+std::atomic_bool g_force_60fps_swap_interval{false};
 
 s32 NormalizeSwapInterval(f32* out_speed_scale, s32 swap_interval) {
     if (swap_interval <= 0) {
@@ -37,10 +40,18 @@ s32 NormalizeSwapInterval(f32* out_speed_scale, s32 swap_interval) {
         swap_interval = 1;
     }
 
+    if (swap_interval == 2 && g_force_60fps_swap_interval.load(std::memory_order_relaxed)) {
+        swap_interval = 1;
+    }
+
     return swap_interval;
 }
 
 } // namespace
+
+void SetForce60FpsSwapInterval(bool enabled) {
+    g_force_60fps_swap_interval.store(enabled, std::memory_order_relaxed);
+}
 
 HardwareComposer::HardwareComposer() = default;
 HardwareComposer::~HardwareComposer() = default;

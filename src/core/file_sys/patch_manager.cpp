@@ -1798,7 +1798,8 @@ void DisableNewModsFor(u64 title_id, const VirtualDir& mod_dir, const VirtualDir
             if (is_seen(name) || ModTypes(mod).empty()) {
                 continue;
             }
-            (IsBuiltinDynamicFpsMod(title_id, mod) ? keep : fresh).push_back(std::move(name));
+            const bool keep_enabled = IsBuiltinDynamicFpsMod(title_id, mod) || name == "60 FPS";
+            (keep_enabled ? keep : fresh).push_back(std::move(name));
         }
     }
     if (sdmc_mod_dir != nullptr && !is_seen("SDMC") && !SdmcModTypes(sdmc_mod_dir).empty()) {
